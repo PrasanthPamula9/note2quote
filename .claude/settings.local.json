@@ -1,7 +1,7 @@
 {
   "env": {
     "ANTHROPIC_BASE_URL": "https://openrouter.ai/api",
-    "ANTHROPIC_AUTH_TOKEN": "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",
+    "ANTHROPIC_AUTH_TOKEN": "",
     "ANTHROPIC_API_KEY": "",
     "ANTHROPIC_DEFAULT_OPUS_MODEL": "qwen/qwen3-coder:free",
     "ANTHROPIC_DEFAULT_SONNET_MODEL": "nvidia/nemotron-3-nano-30b-a3b:free",

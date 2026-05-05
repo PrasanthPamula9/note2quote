@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import {
   View,
   Text,
@@ -26,11 +26,7 @@ export default function NotesView({
   onAddNote 
 }: NotesViewProps) {
   const [filter, setFilter] = useState<NotebookFilter>('all');
-  const [notes, setNotes] = useState<Note[]>(defaultNotes);
-
-  useEffect(() => {
-    setNotes(defaultNotes);
-  }, [defaultNotes]);
+  const [notes] = useState<Note[]>(defaultNotes);
 
   const filteredNotes = notes.filter((note) => {
     if (filter === 'handwritten') {
@@ -141,13 +137,13 @@ export default function NotesView({
       </View>
 
       {/* Notes List */}
-      {/* <FlatList
+      <FlatList
         data={filteredNotes}
         renderItem={renderNoteCard}
         keyExtractor={(item) => item.id}
         contentContainerStyle={styles.listContent}
         showsVerticalScrollIndicator={false}
-      /> */}
+      />
 
       {/* Floating Action Button */}
       <FAB
