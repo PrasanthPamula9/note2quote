@@ -1,6 +1,6 @@
 {
   "name": "note2quote",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "private": true,
   "scripts": {
     "android": "react-native run-android",
@@ -10,13 +10,27 @@
     "test": "jest"
   },
   "dependencies": {
+    "@nozbe/watermelondb": "^0.28.0",
+    "@react-native-community/slider": "^5.1.2",
+    "@react-native-vector-icons/material-design-icons": "^12.4.2",
+    "@react-native/new-app-screen": "0.83.0",
+    "@shopify/react-native-skia": "^2.5.1",
+    "install": "^0.13.0",
+    "npm": "^11.11.1",
     "react": "19.2.0",
     "react-native": "0.83.0",
-    "@react-native/new-app-screen": "0.83.0",
-    "react-native-safe-area-context": "^5.5.2"
+    "react-native-color-picker": "^0.6.0",
+    "react-native-gesture-handler": "^2.30.0",
+    "react-native-image-picker": "^8.2.1",
+    "react-native-paper": "^5.15.0",
+    "react-native-reanimated": "^4.2.2",
+    "react-native-safe-area-context": "^5.5.2",
+    "react-native-worklets": "^0.7.4",
+    "reanimated-color-picker": "^4.2.0"
   },
   "devDependencies": {
     "@babel/core": "^7.25.2",
+    "@babel/plugin-proposal-decorators": "^7.29.0",
     "@babel/preset-env": "^7.25.3",
     "@babel/runtime": "^7.25.0",
     "@react-native-community/cli": "20.0.0",
