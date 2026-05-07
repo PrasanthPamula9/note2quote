@@ -13,12 +13,14 @@ import {
 import { Appbar, Menu, Portal } from 'react-native-paper';
 import MaterialIcons from '@react-native-vector-icons/material-design-icons';
 import { Note } from '../../types/notes';
+import SelectableNoteBodyView from '../native/SelectableNoteBodyView';
 
 interface NoteDetailViewProps {
   note: Note;
   onBack?: () => void;
   onSave?: (note: Note) => void;
   onDelete?: (noteId: string) => void;
+  onCreateQuote?: (quoteText: string) => void;
 }
 
 export default function NoteDetailView({
@@ -26,6 +28,7 @@ export default function NoteDetailView({
   onBack,
   onSave,
   onDelete,
+  onCreateQuote,
 }: NoteDetailViewProps) {
   const [note, setNote] = useState<Note>(initialNote);
   const [isEditing, setIsEditing] = useState(false);
@@ -33,7 +36,12 @@ export default function NoteDetailView({
   const [deleteModalVisible, setDeleteModalVisible] = useState(false);
 
   const handleSave = () => {
-    onSave?.(note);
+    const nextNote = {
+      ...note,
+      updated_at: Date.now(),
+    };
+    setNote(nextNote);
+    onSave?.(nextNote);
     setIsEditing(false);
   };
 
@@ -46,8 +54,8 @@ export default function NoteDetailView({
     setDeleteModalVisible(false);
   };
 
-  const formatDate = (date: Date) => {
-    const d = new Date(date);
+  const formatDate = (timestamp: number) => {
+    const d = new Date(timestamp);
     const options: Intl.DateTimeFormatOptions = {
       year: 'numeric',
       month: '2-digit',
@@ -62,11 +70,10 @@ export default function NoteDetailView({
     return text.trim().split(/\s+/).filter((word) => word.length > 0).length;
   };
 
-  const wordCount = getWordCount(note.content);
+  const wordCount = getWordCount(note.body);
 
   return (
     <SafeAreaView style={styles.container}>
-      {/* Header */}
       <Appbar.Header style={styles.header}>
         <Appbar.BackAction onPress={onBack} />
         <View style={styles.headerActions}>
@@ -105,15 +112,12 @@ export default function NoteDetailView({
         </View>
       </Appbar.Header>
 
-      {/* Note Metadata */}
       <View style={styles.metadata}>
         <Text style={styles.metadataText}>
-          {formatDate(note.updatedAt)} | {wordCount} |{' '}
-          {note.notebook}
+          {formatDate(note.updated_at)} | {wordCount}
         </Text>
       </View>
 
-      {/* Content */}
       <ScrollView
         style={styles.content}
         contentContainerStyle={styles.contentContainer}
@@ -122,19 +126,19 @@ export default function NoteDetailView({
           <>
             <TextInput
               style={styles.titleInput}
-              placeholder="Note title"
-              value={note.title}
+              placeholder="Header"
+              value={note.header}
               onChangeText={(text) =>
-                setNote({ ...note, title: text })
+                setNote({ ...note, header: text })
               }
               placeholderTextColor="#ccc"
             />
             <TextInput
               style={styles.contentInput}
-              placeholder="Start typing..."
-              value={note.content}
+              placeholder="Body"
+              value={note.body}
               onChangeText={(text) =>
-                setNote({ ...note, content: text })
+                setNote({ ...note, body: text })
               }
               placeholderTextColor="#ccc"
               multiline
@@ -142,13 +146,28 @@ export default function NoteDetailView({
           </>
         ) : (
           <>
-            <Text style={styles.title}>{note.title}</Text>
-            <Text style={styles.noteBody}>{note.content}</Text>
+            <Text style={styles.title}>{note.header}</Text>
+            <SelectableNoteBodyView
+              style={styles.noteBodyNative}
+              text={note.body}
+              onCreateQuote={(event) => {
+                onCreateQuote?.(event.nativeEvent.text);
+              }}
+            />
           </>
         )}
       </ScrollView>
 
-      {/* Save Button when Editing */}
+      {!isEditing && note.body.trim() ? (
+        <TouchableOpacity
+          style={styles.createQuoteButton}
+          onPress={() => onCreateQuote?.(note.body.trim())}
+          activeOpacity={0.8}
+        >
+          <Text style={styles.createQuoteButtonText}>Create Quote</Text>
+        </TouchableOpacity>
+      ) : null}
+
       {isEditing && (
         <TouchableOpacity
           style={styles.saveButton}
@@ -159,7 +178,6 @@ export default function NoteDetailView({
         </TouchableOpacity>
       )}
 
-      {/* Delete Confirmation Modal */}
       <Portal>
         <Modal
           visible={deleteModalVisible}
@@ -258,6 +276,26 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: '#333',
     lineHeight: 24,
+  },
+  noteBodyNative: {
+    minHeight: 180,
+    fontSize: 16,
+    color: '#333',
+    lineHeight: 24,
+    marginTop: 2,
+  },
+  createQuoteButton: {
+    marginHorizontal: 16,
+    marginBottom: 12,
+    backgroundColor: '#1a73e8',
+    paddingVertical: 14,
+    borderRadius: 8,
+    alignItems: 'center',
+  },
+  createQuoteButtonText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#fff',
   },
   contentInput: {
     fontSize: 16,
