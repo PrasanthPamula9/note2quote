@@ -33,7 +33,12 @@ export default function NoteDetailView({
   const [deleteModalVisible, setDeleteModalVisible] = useState(false);
 
   const handleSave = () => {
-    onSave?.(note);
+    const nextNote = {
+      ...note,
+      updatedAt: new Date(),
+    };
+    setNote(nextNote);
+    onSave?.(nextNote);
     setIsEditing(false);
   };
 

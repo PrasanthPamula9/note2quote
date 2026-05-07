@@ -12,7 +12,7 @@ import { Chip } from 'react-native-paper';
 import { FAB } from 'react-native-paper';
 import MaterialIcons from '@react-native-vector-icons/material-design-icons';
 import { Note, NotebookFilter } from '../../types/notes';
-import { Appbar, Icon } from 'react-native-paper'
+import { Appbar } from 'react-native-paper';
 
 interface NotesViewProps {
   notes?: Note[];
@@ -26,7 +26,7 @@ export default function NotesView({
   onAddNote 
 }: NotesViewProps) {
   const [filter, setFilter] = useState<NotebookFilter>('all');
-  const [notes] = useState<Note[]>(defaultNotes);
+  const notes = defaultNotes;
 
   const filteredNotes = notes.filter((note) => {
     if (filter === 'handwritten') {
@@ -143,6 +143,12 @@ export default function NotesView({
         keyExtractor={(item) => item.id}
         contentContainerStyle={styles.listContent}
         showsVerticalScrollIndicator={false}
+        ListEmptyComponent={
+          <View style={styles.emptyState}>
+            <Text style={styles.emptyTitle}>No notes yet</Text>
+            <Text style={styles.emptyText}>Tap the plus button to create your first note.</Text>
+          </View>
+        }
       />
 
       {/* Floating Action Button */}
@@ -202,6 +208,23 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingTop: 8,
     paddingBottom: 20,
+  },
+  emptyState: {
+    paddingHorizontal: 24,
+    paddingVertical: 48,
+    alignItems: 'center',
+  },
+  emptyTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#000',
+    marginBottom: 8,
+  },
+  emptyText: {
+    fontSize: 14,
+    color: '#777',
+    textAlign: 'center',
+    lineHeight: 20,
   },
   noteCard: {
     backgroundColor: '#fff',
