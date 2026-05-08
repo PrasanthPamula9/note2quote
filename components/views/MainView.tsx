@@ -14,8 +14,8 @@ const MainView = () => {
     text: string;
   } | null>(null);
   const [routes] = React.useState([
-    { key: 'notes', title: 'Notes', focusedIcon: 'file-image-plus-outline', unfocusedIcon: 'heart-outline'},
-    { key: 'quotes', title: 'Quotes', focusedIcon: 'album',unfocusedIcon: 'heart-outline' },
+    { key: 'notes', title: 'Notes', focusedIcon: 'note-text', unfocusedIcon: 'note-text-outline'},
+    { key: 'quotes', title: 'Quotes', focusedIcon: 'format-quote-close',unfocusedIcon: 'format-quote-close-outline' },
 
   ]);
 

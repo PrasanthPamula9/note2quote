@@ -5,7 +5,10 @@ import { Appbar, Icon } from 'react-native-paper'
 import {listFontFamilies} from "@shopify/react-native-skia";
 import {launchImageLibrary, launchCamera} from 'react-native-image-picker';
 import Slider from '@react-native-community/slider';
-
+import MaterialIcons from '@react-native-vector-icons/material-design-icons';
+import AntDesign from '@react-native-vector-icons/ant-design';
+import Ionicons from '@react-native-vector-icons/ionicons';
+import { Foundation } from '@react-native-vector-icons/foundation';
 import ColorPickerComponent, { HueSlider, Panel1 } from 'reanimated-color-picker';
 import { QuoteEditorConfig, CanvasPresetKey } from '../../types/quotes';
 // ─── Canvas size presets ─────────────────────────────────────────────────────
@@ -176,57 +179,58 @@ export default function QuotesView({
   const FeaturesArray=[
   {
     name:"BackgroundImage",
-    icon:'file-image-plus-outline',
+    icon:<MaterialIcons name="image" size={24}/>,
     label:"Image"
   },
   {
     name:"BackgroundColor",
-    icon:'color-palette-outline',
+    
+    icon:<Foundation name="bg-color"  size={20} />,
     label:"Bg Color"
   },
   {
     name:"FontColor",
-    icon:'text-color',
+    icon:<AntDesign name="font-color" size={24}/>,
     label:"Font Color"
   },
   {
     name:"ImageOpacity",
-    icon:'opacity',
+    icon:<MaterialIcons name="opacity" size={24}/>,
     label:"Opacity"
   },
   {
     name:"FontSize",
-    icon:'font-size',
+    icon:<MaterialIcons name="format-size" size={24}/>,
     label:"Font Size"
   },
   {
     name:"FontFamily",
-    icon:'font-awesome',
+    icon:<MaterialIcons name="format-font" size={24}/>,
     label:"Fonts"
   },
   {
     name:"CanvasSize",
-    icon:'image-size-select-large',
+    icon:<MaterialIcons name="resize" size={24}/>,
     label:"Size"
   },
   {
     name:"FontShadow",
-    icon:'shadow',
+    icon:<MaterialIcons name="text-shadow" size={24}/>,
     label:"Shadow"
   },
   {
     name:"FontWeight",
-    icon:'format-bold',
+    icon:<MaterialIcons name="format-line-weight" size={24}/>,
     label:"Weight"
   },
   {
     name:"TextEdit",
-    icon:'pencil',
+    icon:<MaterialIcons name="pencil" size={24}/>,
     label:"Edit Text"
   },
   {
     name:"TextPosition",
-    icon:'move-resize-variant',
+    icon:<MaterialIcons name="axis-arrow" size={24}/>,
     label:"Text Position"
   }
 ];
@@ -681,7 +685,10 @@ const imageUri = backgroundImageUri || require("../../assets/test.jpg");
               ))} */}
               {FeaturesArray.map((feature, index) => (
                 <View key={`feature-item-${index}`} style={styles.settingsGridItem} onTouchEnd={() => HandleFeature(feature.name)}>
-                  <Icon source={feature.icon} size={24} />
+                  {/* <Icon source={feature.icon} size={24} /> */}
+                  {/* <MaterialIcons name={feature.icon} size={24}/> */}
+                  {feature.icon}
+
                   <Text style={styles.settingsGridItemText}>{feature.label}</Text>
                 </View>
               ))}
