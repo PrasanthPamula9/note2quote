@@ -1,24 +1,17 @@
-import React, { useMemo, useState } from 'react'
-import { View, Text, StyleSheet, useWindowDimensions, Modal, FlatList, Pressable, Platform, ScrollView, Alert, TextInput } from 'react-native';
-import { PanGestureHandler } from 'react-native-gesture-handler';
-import Animated, { useSharedValue, runOnJS } from 'react-native-reanimated';
+import React, { useEffect, useMemo, useState } from 'react'
+import { View, Text, StyleSheet, useWindowDimensions, Modal, FlatList, Pressable, ScrollView, Alert, TextInput } from 'react-native';
 import { Canvas, Rect, Image as SkiaImage, useImage, Paragraph, Skia, TextAlign, FontWeight, FontSlant } from '@shopify/react-native-skia';
 import { Appbar, Icon } from 'react-native-paper'
 import {listFontFamilies} from "@shopify/react-native-skia";
 import {launchImageLibrary, launchCamera} from 'react-native-image-picker';
 import Slider from '@react-native-community/slider';
-
+import MaterialIcons from '@react-native-vector-icons/material-design-icons';
+import AntDesign from '@react-native-vector-icons/ant-design';
+import Ionicons from '@react-native-vector-icons/ionicons';
+import { Foundation } from '@react-native-vector-icons/foundation';
 import ColorPickerComponent, { HueSlider, Panel1 } from 'reanimated-color-picker';
+import { QuoteEditorConfig, CanvasPresetKey } from '../../types/quotes';
 // ─── Canvas size presets ─────────────────────────────────────────────────────
-// nativeWidth / nativeHeight = the actual export/render resolution
-// aspectRatio is derived from those values and used to scale the on-screen canvas
-type CanvasPresetKey =
-  | 'instagram_post_square'
-  | 'instagram_post_portrait'
-  | 'instagram_post_landscape'
-  | 'instagram_story'
-  | 'whatsapp_status';
-
 type CanvasPreset = {
   label: string;
   nativeWidth: number;
@@ -64,9 +57,43 @@ const CANVAS_PRESETS: Record<CanvasPresetKey, CanvasPreset> = {
   },
 };
 
+const DEFAULT_QUOTE_TEXT = 'Go and build something amazing with React Native Skia!';
 
+const DEFAULT_EDITOR_CONFIG: QuoteEditorConfig = {
+  activeCanvasKey: 'instagram_post_portrait',
+  background_image_uri: null,
+  image_opacity: 0.6,
+  font_size: 14,
+  font_color: 'white',
+  bg_color: '#222222',
+  font_family: 'serif',
+  font_shadow: 0,
+  font_weight: FontWeight.Bold,
+  text_align: TextAlign.Center,
+  quote_text: DEFAULT_QUOTE_TEXT,
+  text_x_percent: 0.05,
+  text_y_percent: 0.35,
+};
 
-export default function QuotesView() {
+type QuotesViewProps = {
+  title?: string;
+  initialQuoteText?: string;
+  initialBackgroundImageUri?: string | null;
+  initialEditorConfig?: QuoteEditorConfig | null;
+  onBack?: () => void;
+  onSave?: (quote: QuoteEditorConfig) => void | Promise<void>;
+  onDelete?: () => void | Promise<void>;
+};
+
+export default function QuotesView({
+  title = 'Quotes',
+  initialQuoteText,
+  initialBackgroundImageUri,
+  initialEditorConfig,
+  onBack,
+  onSave,
+  onDelete,
+}: QuotesViewProps) {
 
   //Todo  make the width and height of the canvas based on user selection quote verticle / instagram view etc
   //Todo  make the background color of the canvas based on user selection
@@ -75,28 +102,66 @@ export default function QuotesView() {
   //todo impliment text input by default at the center of the canvas
   //todo create saving mechanisum without loosing user created layout, fonts, colors etc
   
-  const [activeCanvasKey, setActiveCanvasKey] = useState<CanvasPresetKey>('instagram_post_portrait');
-  const [dropdownVisible, setDropdownVisible] = useState(false);
-  const [backgroundImageUri, setBackgroundImageUri] = useState<string | null>(null);
+  const [activeCanvasKey, setActiveCanvasKey] = useState<CanvasPresetKey>(
+    initialEditorConfig?.activeCanvasKey ?? DEFAULT_EDITOR_CONFIG.activeCanvasKey,
+  );
+  const [backgroundImageUri, setBackgroundImageUri] = useState<string | null>(
+    initialEditorConfig?.background_image_uri ?? initialBackgroundImageUri ?? null,
+  );
   const [modalVisible, setModalVisible] = useState(false);
   const [currentFeature, setCurrentFeature] = useState<string | null>(null);
-  const [imageOpacity, setImageOpacity] = useState(0.6);
-  const [fontSize, setFontSize] = useState(14);
-  const [fontColor, setFontColor] = useState('white');
-  const [bgColor, setBgColor] = useState('#222222');
-  const [fontFamily, setFontFamily] = useState('serif');
-  const [fontShadow, setFontShadow] = useState(0);
-  const [fontWeight, setFontWeight] = useState(FontWeight.Bold);
-  const [textAlign, setTextAlign] = useState(TextAlign.Center);
-  const [quoteText, setQuoteText] = useState('Go and build something amazing with React Native Skia!');
+  const [imageOpacity, setImageOpacity] = useState(
+    initialEditorConfig?.image_opacity ?? DEFAULT_EDITOR_CONFIG.image_opacity,
+  );
+  const [fontSize, setFontSize] = useState(
+    initialEditorConfig?.font_size ?? DEFAULT_EDITOR_CONFIG.font_size,
+  );
+  const [fontColor, setFontColor] = useState(
+    initialEditorConfig?.font_color ?? DEFAULT_EDITOR_CONFIG.font_color,
+  );
+  const [bgColor, setBgColor] = useState(
+    initialEditorConfig?.bg_color ?? DEFAULT_EDITOR_CONFIG.bg_color,
+  );
+  const [fontFamily, setFontFamily] = useState(
+    initialEditorConfig?.font_family ?? DEFAULT_EDITOR_CONFIG.font_family,
+  );
+  const [fontShadow, setFontShadow] = useState(
+    initialEditorConfig?.font_shadow ?? DEFAULT_EDITOR_CONFIG.font_shadow,
+  );
+  const [fontWeight, setFontWeight] = useState<FontWeight>(
+    initialEditorConfig?.font_weight ?? DEFAULT_EDITOR_CONFIG.font_weight,
+  );
+  const [textAlign, setTextAlign] = useState<TextAlign>(
+    initialEditorConfig?.text_align ?? DEFAULT_EDITOR_CONFIG.text_align,
+  );
+  const [quoteText, setQuoteText] = useState(
+    initialEditorConfig?.quote_text ?? initialQuoteText ?? DEFAULT_QUOTE_TEXT,
+  );
   // text position as percentages of canvas dimensions
-  const [textXPercent, setTextXPercent] = useState(0.05);
-  const [textYPercent, setTextYPercent] = useState(0.35);
+  const [textXPercent, setTextXPercent] = useState(
+    initialEditorConfig?.text_x_percent ?? DEFAULT_EDITOR_CONFIG.text_x_percent,
+  );
+  const [textYPercent, setTextYPercent] = useState(
+    initialEditorConfig?.text_y_percent ?? DEFAULT_EDITOR_CONFIG.text_y_percent,
+  );
   // get available fonts
   const availableFonts = listFontFamilies();
-  // shared values for gesture handling
-  const textXShared = useSharedValue(textXPercent);
-  const textYShared = useSharedValue(textYPercent);
+  useEffect(() => {
+    const config = initialEditorConfig ?? DEFAULT_EDITOR_CONFIG;
+    setActiveCanvasKey(config.activeCanvasKey);
+    setBackgroundImageUri(config.background_image_uri ?? initialBackgroundImageUri ?? null);
+    setImageOpacity(config.image_opacity);
+    setFontSize(config.font_size);
+    setFontColor(config.font_color);
+    setBgColor(config.bg_color);
+    setFontFamily(config.font_family);
+    setFontShadow(config.font_shadow);
+    setFontWeight(config.font_weight);
+    setTextAlign(config.text_align);
+    setQuoteText(config.quote_text || initialQuoteText || DEFAULT_QUOTE_TEXT);
+    setTextXPercent(config.text_x_percent);
+    setTextYPercent(config.text_y_percent);
+  }, [initialBackgroundImageUri, initialEditorConfig, initialQuoteText]);
 
     const activePreset = CANVAS_PRESETS[activeCanvasKey];
 
@@ -114,57 +179,58 @@ export default function QuotesView() {
   const FeaturesArray=[
   {
     name:"BackgroundImage",
-    icon:'file-image-plus-outline',
+    icon:<MaterialIcons name="image" size={24}/>,
     label:"Image"
   },
   {
     name:"BackgroundColor",
-    icon:'format-color-highlight',
+    
+    icon:<Foundation name="bg-color"  size={20} />,
     label:"Bg Color"
   },
   {
     name:"FontColor",
-    icon:'format-color',
+    icon:<AntDesign name="font-color" size={24}/>,
     label:"Font Color"
   },
   {
     name:"ImageOpacity",
-    icon:'file-image-plus-outline',
+    icon:<MaterialIcons name="opacity" size={24}/>,
     label:"Opacity"
   },
   {
     name:"FontSize",
-    icon:'format-size',
+    icon:<MaterialIcons name="format-size" size={24}/>,
     label:"Font Size"
   },
   {
     name:"FontFamily",
-    icon:'format-font',
+    icon:<MaterialIcons name="format-font" size={24}/>,
     label:"Fonts"
   },
   {
     name:"CanvasSize",
-    icon:'image-size-select-large',
+    icon:<MaterialIcons name="resize" size={24}/>,
     label:"Size"
   },
   {
     name:"FontShadow",
-    icon:'shadow',
+    icon:<MaterialIcons name="text-shadow" size={24}/>,
     label:"Shadow"
   },
   {
     name:"FontWeight",
-    icon:'format-bold',
+    icon:<MaterialIcons name="format-line-weight" size={24}/>,
     label:"Weight"
   },
   {
     name:"TextEdit",
-    icon:'pencil',
+    icon:<MaterialIcons name="pencil" size={24}/>,
     label:"Edit Text"
   },
   {
     name:"TextPosition",
-    icon:'move-resize-variant',
+    icon:<MaterialIcons name="axis-arrow" size={24}/>,
     label:"Text Position"
   }
 ];
@@ -537,7 +603,41 @@ const imageUri = backgroundImageUri || require("../../assets/test.jpg");
     <>
     <View style={styles.container}>
       <Appbar.Header>
-        <Appbar.Content title="Notes" />
+        {onBack ? <Appbar.BackAction onPress={onBack} /> : null}
+        <Appbar.Content title={title} />
+        {onDelete ? (
+          <Appbar.Action
+            icon="delete-outline"
+            onPress={() => {
+              Alert.alert('Delete quote?', 'This quote will be removed permanently.', [
+                { text: 'Cancel', style: 'cancel' },
+                { text: 'Delete', style: 'destructive', onPress: () => onDelete() },
+              ]);
+            }}
+          />
+        ) : null}
+        {onSave ? (
+          <Appbar.Action
+            icon="content-save-outline"
+            onPress={() => {
+              onSave({
+                activeCanvasKey,
+                background_image_uri: backgroundImageUri,
+                image_opacity: imageOpacity,
+                font_size: fontSize,
+                font_color: fontColor,
+                bg_color: bgColor,
+                font_family: fontFamily,
+                font_shadow: fontShadow,
+                font_weight: fontWeight,
+                text_align: textAlign,
+                quote_text: quoteText,
+                text_x_percent: textXPercent,
+                text_y_percent: textYPercent,
+              });
+            }}
+          />
+        ) : null}
       </Appbar.Header>
 
       <Pressable
@@ -585,7 +685,10 @@ const imageUri = backgroundImageUri || require("../../assets/test.jpg");
               ))} */}
               {FeaturesArray.map((feature, index) => (
                 <View key={`feature-item-${index}`} style={styles.settingsGridItem} onTouchEnd={() => HandleFeature(feature.name)}>
-                  <Icon source={feature.icon} size={24} />
+                  {/* <Icon source={feature.icon} size={24} /> */}
+                  {/* <MaterialIcons name={feature.icon} size={24}/> */}
+                  {feature.icon}
+
                   <Text style={styles.settingsGridItemText}>{feature.label}</Text>
                 </View>
               ))}

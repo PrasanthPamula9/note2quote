@@ -1,13 +1,9 @@
 export interface Note {
   id: string;
-  title: string;
-  content: string;
-  createdAt: Date;
-  updatedAt: Date;
-  notebook: string;
-  isHandwritten?: boolean;
-  color?: string;
-  thumbnail?: string;
+  header: string;
+  body: string;
+  created_at: number;
+  updated_at: number;
 }
 
 export type NotebookFilter = 'all' | 'handwritten' | 'default';
