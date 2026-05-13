@@ -24,6 +24,9 @@ export default function QuotesGalleryView({
   onAddQuote,
   onQuotePress,
 }: QuotesGalleryViewProps) {
+  const getPreviewTextColor = (quote: Quote) =>
+    quote.editor_config.text_boxes?.[0]?.font_color ?? quote.editor_config.font_color;
+
   const getBackgroundSource = (quote: Quote) =>
     quote.editor_config.background_image_uri
       ? { uri: quote.editor_config.background_image_uri }
@@ -72,11 +75,11 @@ export default function QuotesGalleryView({
                   <View style={[styles.heroOverlay, { backgroundColor: item.editor_config.bg_color }]} />
                 </ImageBackground>
                 <View style={styles.quoteBody}>
-                  <Text style={[styles.quoteMark, { color: item.editor_config.font_color }]}>{'"'}</Text>
-                  <Text style={[styles.quoteText, { color: item.editor_config.font_color }]} numberOfLines={4}>
+                  <Text style={[styles.quoteMark, { color: getPreviewTextColor(item) }]}>{'"'}</Text>
+                  <Text style={[styles.quoteText, { color: getPreviewTextColor(item) }]} numberOfLines={4}>
                     {item.quote_text}
                   </Text>
-                  <Text style={[styles.dateText, { color: item.editor_config.font_color }]}>
+                  <Text style={[styles.dateText, { color: getPreviewTextColor(item) }]}>
                     {formatDate(item.updated_at)}
                   </Text>
                 </View>
