@@ -6,6 +6,7 @@
  */
 import 'react-native-reanimated';
 import { StatusBar, useColorScheme } from 'react-native';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { Provider as PaperProvider } from 'react-native-paper';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import MainView from './components/views/MainView';
@@ -15,11 +16,13 @@ function App() {
 
   return (
     <SafeAreaProvider>
-      <PaperProvider>
-        <StatusBar barStyle={isDarkMode ? 'light-content' : 'dark-content'} />
-        {/* <AppContent /> */}
-        <MainView />
-      </PaperProvider>
+      <GestureHandlerRootView style={{ flex: 1 }}>
+        <PaperProvider>
+          <StatusBar barStyle={isDarkMode ? 'light-content' : 'dark-content'} />
+          {/* <AppContent /> */}
+          <MainView />
+        </PaperProvider>
+      </GestureHandlerRootView>
     </SafeAreaProvider>
   );
 }

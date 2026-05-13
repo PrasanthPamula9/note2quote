@@ -611,14 +611,19 @@ const imageUri = backgroundImageUri || require("../../assets/test.jpg");
       case 'BackgroundColor':
       case 'FontColor':
         return (
-          <Pressable style={styles.modalBackdrop} onPress={() => setModalVisible(false)}>
-            <View style={[styles.modalContent, { height: screenHeight * 0.4 }]} onStartShouldSetResponder={() => true}>
+          <View style={styles.modalBackdrop}>
+            <Pressable style={StyleSheet.absoluteFill} onPress={() => setModalVisible(false)} />
+            <View style={[styles.modalContent, { height: screenHeight * 0.4 }]}>
               <Text style={styles.modalTitle}>
                 {currentFeature === 'FontColor' ? 'Font Color' : 'Background Color'}
               </Text>
               <ColorPickerComponent
                 value={currentFeature === 'FontColor' ? resolvedTextColor : bgColor}
-                onCompleteJS={(color) => {
+                sliderThickness={25}
+                thumbSize={24}
+                thumbShape='circle'
+                boundedThumb
+                onChangeJS={(color) => {
                   if (currentFeature === 'FontColor') {
                     setTextColor(color.hex);
                   } else {
@@ -626,11 +631,11 @@ const imageUri = backgroundImageUri || require("../../assets/test.jpg");
                   }
                 }}
               >
-                <Panel1 style={{ borderRadius: 16 }} />
+                <Panel1 style={{ borderRadius: 16 }} boundedThumb thumbShape='circle' thumbSize={24} />
                 <HueSlider style={{ marginTop: 16, borderRadius: 16 }} />
               </ColorPickerComponent>
             </View>
-          </Pressable>
+          </View>
         )
       case 'ImageOpacity':
         return (
