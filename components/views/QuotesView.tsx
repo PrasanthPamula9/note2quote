@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react'
+import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { View, Text, StyleSheet, useWindowDimensions, Modal, FlatList, Pressable, ScrollView, Alert, TextInput } from 'react-native';
 import { Canvas, Rect, Image as SkiaImage, useImage, Paragraph, Skia, TextAlign, FontWeight, FontSlant } from '@shopify/react-native-skia';
 import { Appbar, Icon } from 'react-native-paper'
@@ -6,11 +6,8 @@ import {listFontFamilies} from "@shopify/react-native-skia";
 import {launchImageLibrary, launchCamera} from 'react-native-image-picker';
 import Slider from '@react-native-community/slider';
 import MaterialIcons from '@react-native-vector-icons/material-design-icons';
-// import AntDesign from '@react-native-vector-icons/ant-design';
-// import Ionicons from '@react-native-vector-icons/ionicons';
-// import { Foundation } from '@react-native-vector-icons/foundation';
 import ColorPickerComponent, { HueSlider, Panel1 } from 'reanimated-color-picker';
-import { QuoteEditorConfig, CanvasPresetKey } from '../../types/quotes';
+import { QuoteEditorConfig, CanvasPresetKey, QuoteTextBox } from '../../types/quotes';
 // ─── Canvas size presets ─────────────────────────────────────────────────────
 type CanvasPreset = {
   label: string;
@@ -58,9 +55,15 @@ const CANVAS_PRESETS: Record<CanvasPresetKey, CanvasPreset> = {
 };
 
 const DEFAULT_QUOTE_TEXT = 'Go and build something amazing with React Native Skia!';
+const MAX_TEXT_BOXES = 5;
+const DEFAULT_TEXT_BOX_WIDTH = 0.55;
+const DEFAULT_TEXT_BOX_HEIGHT = 0.22;
+const DEFAULT_TEXT_BOX_VERTICAL_GAP = 0.04;
+const TEXT_BOX_HORIZONTAL_PADDING = 12;
+const TEXT_BOX_VERTICAL_PADDING = 10;
 
 const DEFAULT_EDITOR_CONFIG: QuoteEditorConfig = {
-  activeCanvasKey: 'instagram_post_portrait',
+  activeCanvasKey: 'instagram_post_square',
   background_image_uri: null,
   image_opacity: 0.6,
   font_size: 14,
@@ -71,8 +74,72 @@ const DEFAULT_EDITOR_CONFIG: QuoteEditorConfig = {
   font_weight: FontWeight.Bold,
   text_align: TextAlign.Center,
   quote_text: DEFAULT_QUOTE_TEXT,
+  text_boxes: [
+    {
+      id: 'text-1',
+      text: DEFAULT_QUOTE_TEXT,
+      x_percent: 0.05,
+      y_percent: 0.35,
+      width_percent: DEFAULT_TEXT_BOX_WIDTH,
+      height_percent: DEFAULT_TEXT_BOX_HEIGHT,
+    },
+  ],
   text_x_percent: 0.05,
   text_y_percent: 0.35,
+};
+
+const clampPercentValue = (value: number, min: number, max: number) =>
+  Math.min(max, Math.max(min, value));
+
+const clampDeltaValue = (value: number, minDelta: number, maxDelta: number) =>
+  Math.min(maxDelta, Math.max(minDelta, value));
+
+const createTextBox = (text = '', index = 0): QuoteTextBox => ({
+  id: `text-${Date.now()}-${index}-${Math.random().toString(16).slice(2, 6)}`,
+  text,
+  x_percent: 0.05,
+  y_percent: Math.min(0.85, 0.35 + index * DEFAULT_TEXT_BOX_VERTICAL_GAP),
+  width_percent: DEFAULT_TEXT_BOX_WIDTH,
+  height_percent: DEFAULT_TEXT_BOX_HEIGHT,
+  font_color: undefined,
+  font_size: undefined,
+  font_family: undefined,
+  font_shadow: undefined,
+  font_weight: undefined,
+  text_align: undefined,
+});
+
+const normalizeTextBoxes = (boxes?: QuoteTextBox[] | null, fallbackText = DEFAULT_QUOTE_TEXT) => {
+  const source = Array.isArray(boxes) && boxes.length > 0 ? boxes.slice(0, MAX_TEXT_BOXES) : [createTextBox(fallbackText, 0)];
+
+  const normalized = source.map((box, index) => ({
+    id: box.id || `text-${index + 1}`,
+    text: box.text ?? '',
+    x_percent: typeof box.x_percent === 'number' ? box.x_percent : 0.05,
+    y_percent: typeof box.y_percent === 'number' ? box.y_percent : Math.min(0.85, 0.35 + index * DEFAULT_TEXT_BOX_VERTICAL_GAP),
+    width_percent: typeof box.width_percent === 'number'
+      ? clampPercentValue(box.width_percent, 0.15, 0.8)
+      : DEFAULT_TEXT_BOX_WIDTH,
+    height_percent: typeof box.height_percent === 'number'
+      ? clampPercentValue(box.height_percent, 0.1, 1)
+      : DEFAULT_TEXT_BOX_HEIGHT,
+    ...(box.font_color != null ? { font_color: String(box.font_color) } : {}),
+    ...(box.font_size != null ? { font_size: Number(box.font_size) } : {}),
+    ...(box.font_family != null ? { font_family: String(box.font_family) } : {}),
+    ...(box.font_shadow != null ? { font_shadow: Number(box.font_shadow) } : {}),
+    ...(box.font_weight != null ? { font_weight: box.font_weight } : {}),
+    ...(box.text_align != null ? { text_align: box.text_align } : {}),
+  }));
+
+  const hasText = normalized.some((box) => String(box.text || '').trim().length > 0);
+  if (!hasText && String(fallbackText || '').trim()) {
+    normalized[0] = {
+      ...normalized[0],
+      text: String(fallbackText),
+    };
+  }
+
+  return normalized;
 };
 
 type QuotesViewProps = {
@@ -134,7 +201,15 @@ export default function QuotesView({
   const [textAlign, setTextAlign] = useState<TextAlign>(
     initialEditorConfig?.text_align ?? DEFAULT_EDITOR_CONFIG.text_align,
   );
-  const [quoteText, setQuoteText] = useState(
+  const [textBoxes, setTextBoxes] = useState<QuoteTextBox[]>(
+    normalizeTextBoxes(
+      initialEditorConfig?.text_boxes,
+      initialEditorConfig?.quote_text ?? initialQuoteText ?? DEFAULT_QUOTE_TEXT,
+    ),
+  );
+  const [selectedTextBoxId, setSelectedTextBoxId] = useState('');
+  const selectedTextInputRef = useRef<TextInput>(null);
+  const [globalQuoteText, setGlobalQuoteText] = useState(
     initialEditorConfig?.quote_text ?? initialQuoteText ?? DEFAULT_QUOTE_TEXT,
   );
   // text position as percentages of canvas dimensions
@@ -158,10 +233,24 @@ export default function QuotesView({
     setFontShadow(config.font_shadow);
     setFontWeight(config.font_weight);
     setTextAlign(config.text_align);
-    setQuoteText(config.quote_text || initialQuoteText || DEFAULT_QUOTE_TEXT);
+    setTextBoxes(normalizeTextBoxes(config.text_boxes, config.quote_text || initialQuoteText || DEFAULT_QUOTE_TEXT));
+    setSelectedTextBoxId('');
+    setGlobalQuoteText(config.quote_text || initialQuoteText || DEFAULT_QUOTE_TEXT);
     setTextXPercent(config.text_x_percent);
     setTextYPercent(config.text_y_percent);
   }, [initialBackgroundImageUri, initialEditorConfig, initialQuoteText]);
+
+  useEffect(() => {
+    if (!modalVisible || currentFeature !== 'TextEdit') {
+      return;
+    }
+
+    const handle = setTimeout(() => {
+      selectedTextInputRef.current?.focus();
+    }, 50);
+
+    return () => clearTimeout(handle);
+  }, [currentFeature, modalVisible, selectedTextBoxId]);
 
     const activePreset = CANVAS_PRESETS[activeCanvasKey];
 
@@ -224,6 +313,11 @@ export default function QuotesView({
     label:"Weight"
   },
   {
+    name:"AddText",
+    icon:<MaterialIcons name="text-box-plus-outline" size={24}/>,
+    label:"Add Text"
+  },
+  {
     name:"TextEdit",
     icon:<MaterialIcons name="pencil" size={24}/>,
     label:"Edit Text"
@@ -237,29 +331,221 @@ export default function QuotesView({
 const imageUri = backgroundImageUri || require("../../assets/test.jpg");
   const image = useImage(imageUri);
 
-  const paragraph = useMemo(() => {
-    const builder = Skia.ParagraphBuilder.Make({
-      textAlign: textAlign,
-      textStyle: {
-        color: Skia.Color(fontColor),
-        fontFamilies: [fontFamily],
-        fontSize,
-        fontStyle: {
-          weight: fontWeight,
-          slant: FontSlant.Italic,
-        },
-        shadows: fontShadow > 0 ? [{ color: Skia.Color('rgba(0,0,0,0.6)'), offset: { x: 1, y: 1 }, blurRadius: fontShadow }] : [],
-      },
-    });
-    builder.addText(quoteText);
-    return builder.build();
-  }, [fontSize, fontFamily, fontColor, fontShadow, fontWeight, textAlign, quoteText]);
+  const selectedTextBox = useMemo(
+    () => textBoxes.find((box) => box.id === selectedTextBoxId) ?? null,
+    [selectedTextBoxId, textBoxes],
+  );
 
+  const quoteText = useMemo(
+    () => textBoxes.map((box) => box.text.trim()).filter(Boolean).join('\n'),
+    [textBoxes],
+  );
+
+  const resolvedTextColor = selectedTextBox?.font_color ?? fontColor;
+  const resolvedTextSize = selectedTextBox?.font_size ?? fontSize;
+  const resolvedTextFamily = selectedTextBox?.font_family ?? fontFamily;
+  const resolvedTextShadow = selectedTextBox?.font_shadow ?? fontShadow;
+  const resolvedTextWeight = selectedTextBox?.font_weight ?? fontWeight;
+  const resolvedTextAlign = selectedTextBox?.text_align ?? textAlign;
+
+  const updateTextBox = (boxId: string, updates: Partial<QuoteTextBox>) => {
+    setTextBoxes((current) => current.map((box) => (box.id === boxId ? { ...box, ...updates } : box)));
+  };
+
+  const updateAllTextBoxes = (updates: Partial<QuoteTextBox>) => {
+    setTextBoxes((current) => current.map((box) => ({ ...box, ...updates })));
+  };
+
+  const focusTextBox = (boxId: string) => {
+    setSelectedTextBoxId(boxId);
+  };
+
+  const clearTextFocus = () => {
+    setSelectedTextBoxId('');
+  };
+
+  const applyTextChange = (value: string) => {
+    if (selectedTextBox) {
+      updateTextBox(selectedTextBox.id, { text: value });
+      return;
+    }
+
+    setGlobalQuoteText(value);
+    updateAllTextBoxes({ text: value });
+  };
+
+  const applyStyleChange = (updates: Partial<QuoteTextBox>, globalSetter?: (value: any) => void, globalValue?: any) => {
+    if (selectedTextBox) {
+      updateTextBox(selectedTextBox.id, updates);
+      return;
+    }
+
+    if (globalSetter) {
+      globalSetter(globalValue);
+    }
+    updateAllTextBoxes(updates);
+  };
+
+  const setTextColor = (color: string) => applyStyleChange({ font_color: color }, setFontColor, color);
+  const setTextSize = (value: number) => applyStyleChange({ font_size: value }, setFontSize, value);
+  const setTextFamily = (family: string) => applyStyleChange({ font_family: family }, setFontFamily, family);
+  const setTextShadow = (value: number) => applyStyleChange({ font_shadow: value }, setFontShadow, value);
+  const setTextWeight = (value: FontWeight) => applyStyleChange({ font_weight: value }, setFontWeight, value);
+  const setTextAlignment = (value: TextAlign) => applyStyleChange({ text_align: value }, setTextAlign, value);
+
+  const setTextX = (value: number) => {
+    if (selectedTextBox) {
+      setTextXPercent(value);
+      updateTextBox(selectedTextBox.id, { x_percent: value });
+      return;
+    }
+
+    const xLimits = textBoxes.reduce(
+      (acc, box) => {
+        const boxWidth = box.width_percent ?? DEFAULT_TEXT_BOX_WIDTH;
+        return {
+          min: Math.min(acc.min, box.x_percent),
+          max: Math.max(acc.max, box.x_percent + boxWidth),
+        };
+      },
+      { min: 1, max: 0 },
+    );
+    const delta = clampDeltaValue(value - textXPercent, -xLimits.min, 1 - xLimits.max);
+    const nextValue = textXPercent + delta;
+    setTextXPercent(nextValue);
+    setTextBoxes((current) =>
+      current.map((box) => ({
+        ...box,
+        x_percent: clampPercentValue(
+          box.x_percent + delta,
+          0,
+          Math.max(0, 1 - (box.width_percent ?? DEFAULT_TEXT_BOX_WIDTH)),
+        ),
+      })),
+    );
+  };
+
+  const setTextY = (value: number) => {
+    if (selectedTextBox) {
+      setTextYPercent(value);
+      updateTextBox(selectedTextBox.id, { y_percent: value });
+      return;
+    }
+
+    const yLimits = textBoxes.reduce(
+      (acc, box) => {
+        const boxHeight = (textBoxMetrics.find((metric) => metric.box.id === box.id)?.contentHeight ?? 0) / canvasHeight;
+        return {
+          min: Math.min(acc.min, box.y_percent),
+          max: Math.max(acc.max, box.y_percent + boxHeight),
+        };
+      },
+      { min: 1, max: 0 },
+    );
+    const delta = clampDeltaValue(value - textYPercent, -yLimits.min, 1 - yLimits.max);
+    const nextValue = textYPercent + delta;
+    setTextYPercent(nextValue);
+    setTextBoxes((current) =>
+      current.map((box) => {
+        const measuredHeight = (textBoxMetrics.find((metric) => metric.box.id === box.id)?.contentHeight ?? 0) / canvasHeight;
+        return {
+          ...box,
+          y_percent: clampPercentValue(
+            box.y_percent + delta,
+            0,
+            Math.max(0, 1 - measuredHeight),
+          ),
+        };
+      }),
+    );
+  };
+
+  const addTextBox = () => {
+    if (textBoxes.length >= MAX_TEXT_BOXES) {
+      return;
+    }
+
+    const lastBox = textBoxes[textBoxes.length - 1];
+    const lastBoxHeight = lastBox
+      ? (textBoxMetrics.find((metric) => metric.box.id === lastBox.id)?.contentHeight ?? 0) / canvasHeight
+      : DEFAULT_TEXT_BOX_HEIGHT;
+    const nextBox = lastBox
+      ? {
+          ...createTextBox('', textBoxes.length),
+          x_percent: lastBox.x_percent,
+          y_percent: clampPercentValue(
+            lastBox.y_percent + lastBoxHeight + DEFAULT_TEXT_BOX_VERTICAL_GAP,
+            0,
+            Math.max(0, 1 - DEFAULT_TEXT_BOX_HEIGHT),
+          ),
+        }
+      : createTextBox('', textBoxes.length);
+    setTextBoxes((current) => [...current, nextBox]);
+    setSelectedTextBoxId(nextBox.id);
+  };
+
+  const removeTextBox = (boxId: string) => {
+    setTextBoxes((current) => {
+      if (current.length <= 1) {
+        return current;
+      }
+
+      const next = current.filter((box) => box.id !== boxId);
+      setSelectedTextBoxId(next[0]?.id ?? '');
+      return next;
+    });
+  };
+
+  const textBoxMetrics = useMemo(
+    () =>
+      textBoxes.map((box) => {
+        const paragraph = (() => {
+          const builder = Skia.ParagraphBuilder.Make({
+            textAlign: box.text_align ?? textAlign,
+            textStyle: {
+              color: Skia.Color(box.font_color ?? fontColor),
+              fontFamilies: [box.font_family ?? fontFamily],
+              fontSize: box.font_size ?? fontSize,
+              fontStyle: {
+                weight: box.font_weight ?? fontWeight,
+                slant: FontSlant.Italic,
+              },
+              shadows:
+                (box.font_shadow ?? fontShadow) > 0
+                  ? [{ color: Skia.Color('rgba(0,0,0,0.6)'), offset: { x: 1, y: 1 }, blurRadius: box.font_shadow ?? fontShadow }]
+                  : [],
+            },
+          });
+          builder.addText(box.text);
+          return builder.build();
+        })();
+
+        const canvasTextWidth = Math.max(
+          24,
+          canvasWidth * (box.width_percent ?? DEFAULT_TEXT_BOX_WIDTH) - TEXT_BOX_HORIZONTAL_PADDING * 2,
+        );
+        paragraph.layout(canvasTextWidth);
+
+        return {
+          box,
+          paragraph,
+          contentWidth: canvasTextWidth,
+          contentHeight: Math.max(24, paragraph.getHeight()),
+        };
+      }),
+    [textBoxes, fontSize, fontFamily, fontColor, fontShadow, fontWeight, textAlign, canvasWidth],
+  );
 
   
 
   const HandleFeature = (featureName:string) => {
     console.log("clicked on feature", featureName)
+        if (featureName === 'AddText') {
+          addTextBox();
+          setCurrentFeature('TextEdit');
+          setModalVisible(true);
+          return;
+        }
         setCurrentFeature(featureName);
         setModalVisible(true);
     
@@ -279,11 +565,6 @@ const imageUri = backgroundImageUri || require("../../assets/test.jpg");
   const HandleOpactyChange = (value:number) => {
     console.log("Opacity value changed:", value);
     setImageOpacity(value);
-  }
-
-  const HandleFontSizeChange = (value:number) => {
-    console.log("Font size value changed:", value);
-    setFontSize(value); // Scale to a more typical font size range
   }
 
   const renderModalContent = () => {
@@ -336,10 +617,10 @@ const imageUri = backgroundImageUri || require("../../assets/test.jpg");
                 {currentFeature === 'FontColor' ? 'Font Color' : 'Background Color'}
               </Text>
               <ColorPickerComponent
-                value={currentFeature === 'FontColor' ? fontColor : bgColor}
+                value={currentFeature === 'FontColor' ? resolvedTextColor : bgColor}
                 onCompleteJS={(color) => {
                   if (currentFeature === 'FontColor') {
-                    setFontColor(color.hex);
+                    setTextColor(color.hex);
                   } else {
                     setBgColor(color.hex);
                   }
@@ -376,10 +657,10 @@ const imageUri = backgroundImageUri || require("../../assets/test.jpg");
                 style={{width: 200, height: 40}}
                 minimumValue={10}
                 maximumValue={30}
-                value={fontSize}
+                value={resolvedTextSize}
                 minimumTrackTintColor="#FFFFFF"
                 maximumTrackTintColor="#000000"
-                onValueChange={(value) => HandleFontSizeChange(value)}
+                onValueChange={(value) => setTextSize(value)}
                 />
                 </View>
           </Pressable>
@@ -395,15 +676,15 @@ const imageUri = backgroundImageUri || require("../../assets/test.jpg");
                 renderItem={({ item }) => (
                   <Pressable
                     onPress={() => {
-                      setFontFamily(item);
+                      setTextFamily(item);
                       setModalVisible(false);
                     }}
-                    style={[styles.fontOption, fontFamily === item && styles.fontOptionActive]}
+                    style={[styles.fontOption, resolvedTextFamily === item && styles.fontOptionActive]}
                   >
-                    <Text style={[styles.fontOptionText, fontFamily === item && styles.fontOptionTextActive]} numberOfLines={1}>
+                    <Text style={[styles.fontOptionText, resolvedTextFamily === item && styles.fontOptionTextActive]} numberOfLines={1}>
                       {item}
                     </Text>
-                    {fontFamily === item && <Icon source="check" size={20} color="#1a73e8" />}
+                    {resolvedTextFamily === item && <Icon source="check" size={20} color="#1a73e8" />}
                   </Pressable>
                 )}
                 scrollEnabled={true}
@@ -455,12 +736,12 @@ const imageUri = backgroundImageUri || require("../../assets/test.jpg");
                   style={styles.sliderLarge}
                   minimumValue={0}
                   maximumValue={10}
-                  value={fontShadow}
+                  value={resolvedTextShadow}
                   minimumTrackTintColor="#1a73e8"
                   maximumTrackTintColor="#ddd"
-                  onValueChange={(value) => setFontShadow(value)}
+                  onValueChange={(value) => setTextShadow(value)}
                 />
-                <Text style={styles.sliderPercentText}>{Math.round(fontShadow)}</Text>
+                <Text style={styles.sliderPercentText}>{Math.round(resolvedTextShadow)}</Text>
               </View>
             </View>
           </Pressable>
@@ -483,12 +764,12 @@ const imageUri = backgroundImageUri || require("../../assets/test.jpg");
                   <Pressable
                     key={index}
                     onPress={() => {
-                      setFontWeight(item.value);
+                      setTextWeight(item.value);
                       setModalVisible(false);
                     }}
-                    style={[styles.weightOption, fontWeight === item.value && styles.weightOptionActive]}
+                    style={[styles.weightOption, resolvedTextWeight === item.value && styles.weightOptionActive]}
                   >
-                    <Text style={[styles.weightOptionText, fontWeight === item.value && styles.weightOptionTextActive]}>
+                    <Text style={[styles.weightOptionText, resolvedTextWeight === item.value && styles.weightOptionTextActive]}>
                       {item.label}
                     </Text>
                   </Pressable>
@@ -500,51 +781,124 @@ const imageUri = backgroundImageUri || require("../../assets/test.jpg");
       case 'TextEdit':
         return (
           <Pressable style={styles.modalBackdrop} onPress={() => setModalVisible(false)}>
-            <View style={[styles.modalContent, { height: screenHeight * 0.65, maxHeight: screenHeight * 0.8 }]} onStartShouldSetResponder={() => true}>
-              <Text style={styles.modalTitle}>Edit Quote</Text>
-              
-              {/* Alignment Buttons */}
+            <ScrollView
+              style={[styles.modalContent, { maxHeight: screenHeight * 0.82 }]}
+              contentContainerStyle={styles.textEditorScrollContent}
+              onStartShouldSetResponder={() => true}
+            >
+              <Text style={styles.modalTitle}>Edit Text Boxes</Text>
+
+              <Text style={styles.textInputLabel}>Choose a box</Text>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.boxPickerRow}>
+                <Pressable
+                  onPress={() => setSelectedTextBoxId('')}
+                  style={[styles.boxPickerChip, !selectedTextBoxId && styles.boxPickerChipActive]}
+                >
+                  <Text style={[styles.boxPickerChipText, !selectedTextBoxId && styles.boxPickerChipTextActive]}>
+                    All Texts
+                  </Text>
+                </Pressable>
+                {textBoxes.map((box, index) => {
+                  const isActive = selectedTextBoxId === box.id;
+                  return (
+                    <Pressable
+                      key={box.id}
+                      onPress={() => setSelectedTextBoxId(box.id)}
+                      style={[styles.boxPickerChip, isActive && styles.boxPickerChipActive]}
+                    >
+                      <Text style={[styles.boxPickerChipText, isActive && styles.boxPickerChipTextActive]}>
+                        Text {index + 1}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+                {textBoxes.length < MAX_TEXT_BOXES ? (
+                  <Pressable onPress={addTextBox} style={[styles.boxPickerChip, styles.boxPickerAddChip]}>
+                    <Icon source="plus" size={18} color="#1a73e8" />
+                    <Text style={styles.boxPickerAddText}>Add</Text>
+                  </Pressable>
+                ) : null}
+              </ScrollView>
+
               <View style={styles.alignmentContainer}>
                 <Pressable
-                  onPress={() => setTextAlign(TextAlign.Left)}
-                  style={[styles.alignButton, textAlign === TextAlign.Left && styles.alignButtonActive]}
+                  onPress={() => setTextAlignment(TextAlign.Left)}
+                  style={[styles.alignButton, resolvedTextAlign === TextAlign.Left && styles.alignButtonActive]}
                 >
-                  <Icon source="format-align-left" size={24} color={textAlign === TextAlign.Left ? '#1a73e8' : '#666'} />
+                  <Icon source="format-align-left" size={24} color={resolvedTextAlign === TextAlign.Left ? '#1a73e8' : '#666'} />
                 </Pressable>
                 <Pressable
-                  onPress={() => setTextAlign(TextAlign.Center)}
-                  style={[styles.alignButton, textAlign === TextAlign.Center && styles.alignButtonActive]}
+                  onPress={() => setTextAlignment(TextAlign.Center)}
+                  style={[styles.alignButton, resolvedTextAlign === TextAlign.Center && styles.alignButtonActive]}
                 >
-                  <Icon source="format-align-center" size={24} color={textAlign === TextAlign.Center ? '#1a73e8' : '#666'} />
+                  <Icon source="format-align-center" size={24} color={resolvedTextAlign === TextAlign.Center ? '#1a73e8' : '#666'} />
                 </Pressable>
                 <Pressable
-                  onPress={() => setTextAlign(TextAlign.Right)}
-                  style={[styles.alignButton, textAlign === TextAlign.Right && styles.alignButtonActive]}
+                  onPress={() => setTextAlignment(TextAlign.Right)}
+                  style={[styles.alignButton, resolvedTextAlign === TextAlign.Right && styles.alignButtonActive]}
                 >
-                  <Icon source="format-align-right" size={24} color={textAlign === TextAlign.Right ? '#1a73e8' : '#666'} />
+                  <Icon source="format-align-right" size={24} color={resolvedTextAlign === TextAlign.Right ? '#1a73e8' : '#666'} />
                 </Pressable>
               </View>
 
-              {/* Text Input */}
-              <Text style={styles.textInputLabel}>Tap to write quote</Text>
+              <Text style={styles.textInputLabel}>
+                {selectedTextBox ? 'Text content for selected box' : 'Text content for all boxes'}
+              </Text>
               <TextInput
+                ref={selectedTextInputRef}
                 style={styles.quoteTextInput}
-                placeholder="Enter your quote here..."
+                placeholder="Enter your text here..."
                 placeholderTextColor="#999"
                 multiline={true}
-                value={quoteText}
-                onChangeText={setQuoteText}
+                value={selectedTextBox ? selectedTextBox.text : globalQuoteText}
+                onChangeText={applyTextChange}
                 textAlignVertical="top"
               />
 
-              {/* Close Button */}
-              <Pressable
-                onPress={() => setModalVisible(false)}
-                style={styles.editCloseButton}
-              >
+              <View style={styles.sliderSection}>
+                <Text style={styles.sliderLabelText}>Box Width</Text>
+                <Slider
+                  style={styles.sliderLarge}
+                  minimumValue={0.15}
+                  maximumValue={0.85}
+                  value={selectedTextBox?.width_percent ?? textBoxes[0]?.width_percent ?? DEFAULT_TEXT_BOX_WIDTH}
+                  minimumTrackTintColor="#1a73e8"
+                  maximumTrackTintColor="#ddd"
+                  onValueChange={(value) => {
+                    if (selectedTextBox) {
+                      updateTextBox(selectedTextBox.id, { width_percent: value });
+                      return;
+                    }
+
+                    updateAllTextBoxes({ width_percent: value });
+                  }}
+                />
+                <Text style={styles.sliderPercentText}>{Math.round((selectedTextBox?.width_percent ?? textBoxes[0]?.width_percent ?? DEFAULT_TEXT_BOX_WIDTH) * 100)}%</Text>
+              </View>
+
+              <View style={styles.textEditorActionsRow}>
+                <Pressable
+                  onPress={addTextBox}
+                  disabled={textBoxes.length >= MAX_TEXT_BOXES}
+                  style={[styles.secondaryActionButton, textBoxes.length >= MAX_TEXT_BOXES && styles.secondaryActionButtonDisabled]}
+                >
+                  <Text style={styles.secondaryActionButtonText}>Add Text</Text>
+                </Pressable>
+                {selectedTextBox ? (
+                  <Pressable
+                    onPress={() => removeTextBox(selectedTextBox.id)}
+                    disabled={textBoxes.length <= 1}
+                    style={[styles.dangerActionButton, textBoxes.length <= 1 && styles.secondaryActionButtonDisabled]}
+                  >
+                    <Text style={styles.dangerActionButtonText}>Delete</Text>
+                  </Pressable>
+                ) : null}
+              </View>
+
+              <Pressable onPress={() => setModalVisible(false)} style={styles.editCloseButton}>
                 <Text style={styles.editCloseButtonText}>Done</Text>
               </Pressable>
-            </View>
+            </ScrollView>
           </Pressable>
         );
       case 'TextPosition':
@@ -552,35 +906,32 @@ const imageUri = backgroundImageUri || require("../../assets/test.jpg");
           <Pressable style={styles.modalBackdrop} onPress={() => setModalVisible(false)}>
             <View style={[styles.modalContent, { height: screenHeight * 0.35 }]}>
               <Text style={styles.modalTitle}>Text Position</Text>
-              
-              {/* X Position Slider */}
               <View style={styles.sliderSection}>
                 <Text style={styles.sliderLabelText}>X Position</Text>
                 <Slider
                   style={styles.sliderLarge}
                   minimumValue={0}
                   maximumValue={1}
-                  value={textXPercent}
+                  value={selectedTextBox ? selectedTextBox.x_percent : textXPercent}
                   minimumTrackTintColor="#1a73e8"
                   maximumTrackTintColor="#ddd"
-                  onValueChange={(value) => setTextXPercent(value)}
+                  onValueChange={setTextX}
                 />
-                <Text style={styles.sliderPercentText}>{Math.round(textXPercent * 100)}%</Text>
+                <Text style={styles.sliderPercentText}>{Math.round((selectedTextBox ? selectedTextBox.x_percent : textXPercent) * 100)}%</Text>
               </View>
 
-              {/* Y Position Slider */}
               <View style={styles.sliderSection}>
                 <Text style={styles.sliderLabelText}>Y Position</Text>
                 <Slider
                   style={styles.sliderLarge}
                   minimumValue={0}
                   maximumValue={1}
-                  value={textYPercent}
+                  value={selectedTextBox ? selectedTextBox.y_percent : textYPercent}
                   minimumTrackTintColor="#1a73e8"
                   maximumTrackTintColor="#ddd"
-                  onValueChange={(value) => setTextYPercent(value)}
+                  onValueChange={setTextY}
                 />
-                <Text style={styles.sliderPercentText}>{Math.round(textYPercent * 100)}%</Text>
+                <Text style={styles.sliderPercentText}>{Math.round((selectedTextBox ? selectedTextBox.y_percent : textYPercent) * 100)}%</Text>
               </View>
             </View>
           </Pressable>
@@ -624,29 +975,24 @@ const imageUri = backgroundImageUri || require("../../assets/test.jpg");
                 activeCanvasKey,
                 background_image_uri: backgroundImageUri,
                 image_opacity: imageOpacity,
-                font_size: fontSize,
-                font_color: fontColor,
+                font_size: selectedTextBox?.font_size ?? fontSize,
+                font_color: selectedTextBox?.font_color ?? fontColor,
                 bg_color: bgColor,
-                font_family: fontFamily,
-                font_shadow: fontShadow,
-                font_weight: fontWeight,
-                text_align: textAlign,
+                font_family: selectedTextBox?.font_family ?? fontFamily,
+                font_shadow: selectedTextBox?.font_shadow ?? fontShadow,
+                font_weight: selectedTextBox?.font_weight ?? fontWeight,
+                text_align: selectedTextBox?.text_align ?? textAlign,
                 quote_text: quoteText,
-                text_x_percent: textXPercent,
-                text_y_percent: textYPercent,
+                text_boxes: textBoxes,
+                text_x_percent: selectedTextBox?.x_percent ?? textBoxes[0]?.x_percent ?? textXPercent,
+                text_y_percent: selectedTextBox?.y_percent ?? textBoxes[0]?.y_percent ?? textYPercent,
               });
             }}
           />
         ) : null}
       </Appbar.Header>
 
-      <Pressable
-        onPress={() => {
-          setCurrentFeature('TextEdit');
-          setModalVisible(true);
-        }}
-        style={[styles.canvas, { width: canvasWidth, height: canvasHeight }]}
-      >
+      <View style={[styles.canvas, { width: canvasWidth, height: canvasHeight }]}>
         <Canvas style={{ width: canvasWidth, height: canvasHeight }}>
           <Rect x={0} y={0} width={canvasWidth} height={canvasHeight} color={bgColor} />
           {image && (
@@ -661,15 +1007,66 @@ const imageUri = backgroundImageUri || require("../../assets/test.jpg");
               height={canvasHeight}
             />
           )}
-          <Paragraph
-            paragraph={paragraph}
-            x={canvasWidth * textXPercent}
-            y={canvasHeight * textYPercent}
-            width={canvasWidth * 0.9}
-          />
-          {/* Drag overlay for moving text */}
+          {textBoxes.map((box, index) => {
+            const metric = textBoxMetrics[index];
+            const paragraph = metric?.paragraph;
+            const boxWidth = Math.max(24, canvasWidth * (box.width_percent ?? DEFAULT_TEXT_BOX_WIDTH));
+            const boxHeight = Math.max(
+              24,
+              (metric?.contentHeight ?? 0) + TEXT_BOX_VERTICAL_PADDING * 2,
+            );
+            const x = canvasWidth * box.x_percent;
+            const y = canvasHeight * box.y_percent;
+
+            return (
+              <Paragraph
+                key={box.id}
+                paragraph={paragraph}
+                x={x + TEXT_BOX_HORIZONTAL_PADDING}
+                y={y + TEXT_BOX_VERTICAL_PADDING}
+                width={Math.max(12, boxWidth - TEXT_BOX_HORIZONTAL_PADDING * 2)}
+              />
+            );
+          })}
         </Canvas>
-      </Pressable>
+        <View style={StyleSheet.absoluteFill} pointerEvents="box-none">
+          <Pressable style={StyleSheet.absoluteFill} onPress={clearTextFocus} />
+          {textBoxes.map((box) => {
+            const isSelected = box.id === selectedTextBoxId;
+            const metric = textBoxMetrics.find((item) => item.box.id === box.id);
+            const boxWidth = Math.max(24, canvasWidth * (box.width_percent ?? DEFAULT_TEXT_BOX_WIDTH));
+            const boxHeight = Math.max(24, (metric?.contentHeight ?? 0) + TEXT_BOX_VERTICAL_PADDING * 2);
+            const x = canvasWidth * box.x_percent;
+            const y = canvasHeight * box.y_percent;
+
+            return (
+              <Pressable
+                key={box.id}
+                onPress={() => focusTextBox(box.id)}
+                style={[
+                  styles.textBoxOverlay,
+                  {
+                    left: x,
+                    top: y,
+                    width: boxWidth,
+                    height: boxHeight,
+                  },
+                  isSelected && styles.textBoxOverlaySelected,
+                ]}
+              >
+                {isSelected ? (
+                  <>
+                    <View style={styles.selectionDotTopLeft} />
+                    <View style={styles.selectionDotTopRight} />
+                    <View style={styles.selectionDotBottomLeft} />
+                    <View style={styles.selectionDotBottomRight} />
+                  </>
+                ) : null}
+              </Pressable>
+            );
+          })}
+        </View>
+      </View>
         <View style={styles.settingsContainer}>
           <ScrollView
             horizontal
@@ -720,6 +1117,60 @@ const styles = StyleSheet.create({
     marginTop: 12,
     marginLeft: '5%',
     marginRight: '5%',
+    position: 'relative',
+    overflow: 'hidden',
+  },
+  textBoxOverlay: {
+    position: 'absolute',
+  },
+  textBoxOverlaySelected: {
+    borderWidth: 1.5,
+    borderColor: '#1a73e8',
+    borderStyle: 'dashed',
+  },
+  selectionDotTopLeft: {
+    position: 'absolute',
+    left: -6,
+    top: -6,
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: '#1a73e8',
+    borderWidth: 2,
+    borderColor: '#fff',
+  },
+  selectionDotTopRight: {
+    position: 'absolute',
+    right: -6,
+    top: -6,
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: '#1a73e8',
+    borderWidth: 2,
+    borderColor: '#fff',
+  },
+  selectionDotBottomLeft: {
+    position: 'absolute',
+    left: -6,
+    bottom: -6,
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: '#1a73e8',
+    borderWidth: 2,
+    borderColor: '#fff',
+  },
+  selectionDotBottomRight: {
+    position: 'absolute',
+    right: -6,
+    bottom: -6,
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: '#1a73e8',
+    borderWidth: 2,
+    borderColor: '#fff',
   },
   // // ── Dropdown trigger ──────────────────────────────────────────────────────
   // dropdownTrigger: {
@@ -847,6 +1298,47 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     marginBottom: 20,
   },
+  textEditorScrollContent: {
+    paddingBottom: 24,
+  },
+  boxPickerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingBottom: 12,
+    marginBottom: 8,
+  },
+  boxPickerChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 999,
+    backgroundColor: '#f3f4f6',
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+  },
+  boxPickerChipActive: {
+    backgroundColor: '#e8f0fe',
+    borderColor: '#1a73e8',
+  },
+  boxPickerChipText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#444',
+  },
+  boxPickerChipTextActive: {
+    color: '#1a73e8',
+  },
+  boxPickerAddChip: {
+    borderStyle: 'dashed',
+  },
+  boxPickerAddText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#1a73e8',
+  },
   modalOptions: {
     flexDirection: 'row',
     justifyContent: 'space-around',
@@ -888,6 +1380,42 @@ const styles = StyleSheet.create({
     marginTop: 8,
     textAlign: 'center',
     fontWeight: '500',
+  },
+  textEditorActionsRow: {
+    flexDirection: 'row',
+    gap: 12,
+    marginTop: 8,
+    marginBottom: 16,
+  },
+  secondaryActionButton: {
+    flex: 1,
+    borderRadius: 10,
+    paddingVertical: 12,
+    alignItems: 'center',
+    backgroundColor: '#e8f0fe',
+  },
+  secondaryActionButtonNeutral: {
+    backgroundColor: '#f3f4f6',
+  },
+  secondaryActionButtonDisabled: {
+    opacity: 0.5,
+  },
+  secondaryActionButtonText: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#1a73e8',
+  },
+  dangerActionButton: {
+    flex: 1,
+    borderRadius: 10,
+    paddingVertical: 12,
+    alignItems: 'center',
+    backgroundColor: '#fde8e8',
+  },
+  dangerActionButtonText: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#c62828',
   },
   inputsRow: {
     flexDirection: 'row',

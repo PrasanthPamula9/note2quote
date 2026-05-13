@@ -72,6 +72,7 @@ export default function QuotesContainer({
     font_weight: Quote['editor_config']['font_weight'];
     text_align: Quote['editor_config']['text_align'];
     quote_text: string;
+    text_boxes: Quote['editor_config']['text_boxes'];
     text_x_percent: number;
     text_y_percent: number;
   }) => {
@@ -87,6 +88,7 @@ export default function QuotesContainer({
       font_weight,
       text_align,
       quote_text,
+      text_boxes,
       text_x_percent,
       text_y_percent,
     } = config;
@@ -107,6 +109,7 @@ export default function QuotesContainer({
       font_weight,
       text_align,
       quote_text: trimmedText,
+      text_boxes,
       text_x_percent,
       text_y_percent,
     };
