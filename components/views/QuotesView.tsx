@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
-import { View, Text, StyleSheet, useWindowDimensions, Modal, FlatList, Pressable, ScrollView, Alert, TextInput } from 'react-native';
-import { Canvas, Rect, Image as SkiaImage, useImage, Paragraph, Skia, TextAlign, FontWeight, FontSlant } from '@shopify/react-native-skia';
+import { View, Text, StyleSheet, useWindowDimensions, Modal, FlatList, Pressable, ScrollView, Alert, TextInput, Platform, PermissionsAndroid } from 'react-native';
+import { Canvas, Rect, Path, Image as SkiaImage, useImage, Paragraph, Skia, TextAlign, FontWeight, FontSlant, useCanvasRef, ImageFormat, StrokeCap } from '@shopify/react-native-skia';
 import { Appbar, Icon } from 'react-native-paper'
 import {listFontFamilies} from "@shopify/react-native-skia";
 import {launchImageLibrary, launchCamera} from 'react-native-image-picker';
@@ -15,6 +15,8 @@ type CanvasPreset = {
   nativeHeight: number;
   aspectRatio: number; // width / height
 };
+
+type ExportFormat = 'png' | 'jpeg' | 'jpg';
 
 const CANVAS_PRESETS: Record<CanvasPresetKey, CanvasPreset> = {
   // Instagram Feed – square  (1:1)
@@ -177,6 +179,13 @@ export default function QuotesView({
   );
   const [modalVisible, setModalVisible] = useState(false);
   const [currentFeature, setCurrentFeature] = useState<string | null>(null);
+  const [exportModalVisible, setExportModalVisible] = useState(false);
+  const [exportFormat, setExportFormat] = useState<ExportFormat>('png');
+  const [exportMenuVisible, setExportMenuVisible] = useState(false);
+  const [exporting, setExporting] = useState(false);
+  const [exportProgress, setExportProgress] = useState(0);
+  const [exportStatus, setExportStatus] = useState('Ready to export');
+  const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
   const [imageOpacity, setImageOpacity] = useState(
     initialEditorConfig?.image_opacity ?? DEFAULT_EDITOR_CONFIG.image_opacity,
   );
@@ -207,8 +216,11 @@ export default function QuotesView({
       initialEditorConfig?.quote_text ?? initialQuoteText ?? DEFAULT_QUOTE_TEXT,
     ),
   );
+  const exportCanvasRef = useCanvasRef();
   const [selectedTextBoxId, setSelectedTextBoxId] = useState('');
   const selectedTextInputRef = useRef<TextInput>(null);
+  const initialSaveKeyRef = useRef<string | null>(null);
+  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [globalQuoteText, setGlobalQuoteText] = useState(
     initialEditorConfig?.quote_text ?? initialQuoteText ?? DEFAULT_QUOTE_TEXT,
   );
@@ -238,7 +250,8 @@ export default function QuotesView({
     setGlobalQuoteText(config.quote_text || initialQuoteText || DEFAULT_QUOTE_TEXT);
     setTextXPercent(config.text_x_percent);
     setTextYPercent(config.text_y_percent);
-  }, [initialBackgroundImageUri, initialEditorConfig, initialQuoteText]);
+    initialSaveKeyRef.current = null;
+  }, []);
 
   useEffect(() => {
     if (!modalVisible || currentFeature !== 'TextEdit') {
@@ -260,11 +273,15 @@ export default function QuotesView({
   const maxDisplayWidth = screenWidth * 0.9;
   // Use 55 % so the dropdown trigger always has room below the canvas
   const maxDisplayHeight = screenHeight * 0.55;
+  const nativeCanvasWidth = activePreset.nativeWidth;
+  const nativeCanvasHeight = activePreset.nativeHeight;
+  const previewScale = Math.min(
+    maxDisplayWidth / nativeCanvasWidth,
+    maxDisplayHeight / nativeCanvasHeight,
+  );
 
-  const scaleByWidth = maxDisplayWidth;
-  const scaleByHeight = maxDisplayHeight * activePreset.aspectRatio;
-  const canvasWidth = Math.min(scaleByWidth, scaleByHeight);
-  const canvasHeight = canvasWidth / activePreset.aspectRatio;
+  const canvasWidth = nativeCanvasWidth * previewScale;
+  const canvasHeight = nativeCanvasHeight * previewScale;
   const FeaturesArray=[
   {
     name:"BackgroundImage",
@@ -434,7 +451,7 @@ const imageUri = backgroundImageUri || require("../../assets/test.jpg");
 
     const yLimits = textBoxes.reduce(
       (acc, box) => {
-        const boxHeight = (textBoxMetrics.find((metric) => metric.box.id === box.id)?.contentHeight ?? 0) / canvasHeight;
+        const boxHeight = (layoutTextBoxMetrics.find((metric) => metric.box.id === box.id)?.contentHeight ?? 0) / nativeCanvasHeight;
         return {
           min: Math.min(acc.min, box.y_percent),
           max: Math.max(acc.max, box.y_percent + boxHeight),
@@ -447,7 +464,7 @@ const imageUri = backgroundImageUri || require("../../assets/test.jpg");
     setTextYPercent(nextValue);
     setTextBoxes((current) =>
       current.map((box) => {
-        const measuredHeight = (textBoxMetrics.find((metric) => metric.box.id === box.id)?.contentHeight ?? 0) / canvasHeight;
+        const measuredHeight = (layoutTextBoxMetrics.find((metric) => metric.box.id === box.id)?.contentHeight ?? 0) / nativeCanvasHeight;
         return {
           ...box,
           y_percent: clampPercentValue(
@@ -467,7 +484,7 @@ const imageUri = backgroundImageUri || require("../../assets/test.jpg");
 
     const lastBox = textBoxes[textBoxes.length - 1];
     const lastBoxHeight = lastBox
-      ? (textBoxMetrics.find((metric) => metric.box.id === lastBox.id)?.contentHeight ?? 0) / canvasHeight
+      ? (layoutTextBoxMetrics.find((metric) => metric.box.id === lastBox.id)?.contentHeight ?? 0) / nativeCanvasHeight
       : DEFAULT_TEXT_BOX_HEIGHT;
     const nextBox = lastBox
       ? {
@@ -496,45 +513,341 @@ const imageUri = backgroundImageUri || require("../../assets/test.jpg");
     });
   };
 
-  const textBoxMetrics = useMemo(
-    () =>
-      textBoxes.map((box) => {
-        const paragraph = (() => {
-          const builder = Skia.ParagraphBuilder.Make({
-            textAlign: box.text_align ?? textAlign,
-            textStyle: {
-              color: Skia.Color(box.font_color ?? fontColor),
-              fontFamilies: [box.font_family ?? fontFamily],
-              fontSize: box.font_size ?? fontSize,
-              fontStyle: {
-                weight: box.font_weight ?? fontWeight,
-                slant: FontSlant.Italic,
-              },
-              shadows:
-                (box.font_shadow ?? fontShadow) > 0
-                  ? [{ color: Skia.Color('rgba(0,0,0,0.6)'), offset: { x: 1, y: 1 }, blurRadius: box.font_shadow ?? fontShadow }]
-                  : [],
+  const buildTextBoxMetrics = (layoutWidth: number) =>
+    textBoxes.map((box) => {
+      const paragraph = (() => {
+        const builder = Skia.ParagraphBuilder.Make({
+          textAlign: box.text_align ?? textAlign,
+          textStyle: {
+            color: Skia.Color(box.font_color ?? fontColor),
+            fontFamilies: [box.font_family ?? fontFamily],
+            fontSize: box.font_size ?? fontSize,
+            fontStyle: {
+              weight: box.font_weight ?? fontWeight,
+              slant: FontSlant.Italic,
             },
-          });
-          builder.addText(box.text);
-          return builder.build();
-        })();
+            shadows:
+              (box.font_shadow ?? fontShadow) > 0
+                ? [{ color: Skia.Color('rgba(0,0,0,0.6)'), offset: { x: 1, y: 1 }, blurRadius: box.font_shadow ?? fontShadow }]
+                : [],
+          },
+        });
+        builder.addText(box.text);
+        return builder.build();
+      })();
 
-        const canvasTextWidth = Math.max(
-          24,
-          canvasWidth * (box.width_percent ?? DEFAULT_TEXT_BOX_WIDTH) - TEXT_BOX_HORIZONTAL_PADDING * 2,
-        );
-        paragraph.layout(canvasTextWidth);
+      const canvasTextWidth = Math.max(
+        24,
+        layoutWidth * (box.width_percent ?? DEFAULT_TEXT_BOX_WIDTH) - TEXT_BOX_HORIZONTAL_PADDING * 2,
+      );
+      paragraph.layout(canvasTextWidth);
 
-        return {
-          box,
-          paragraph,
-          contentWidth: canvasTextWidth,
-          contentHeight: Math.max(24, paragraph.getHeight()),
-        };
-      }),
-    [textBoxes, fontSize, fontFamily, fontColor, fontShadow, fontWeight, textAlign, canvasWidth],
+      return {
+        box,
+        paragraph,
+        contentWidth: canvasTextWidth,
+        contentHeight: Math.max(24, paragraph.getHeight()),
+      };
+    });
+
+  const layoutTextBoxMetrics = useMemo(
+    () => buildTextBoxMetrics(nativeCanvasWidth),
+    [textBoxes, fontSize, fontFamily, fontColor, fontShadow, fontWeight, textAlign, nativeCanvasWidth],
   );
+
+  const selectedLayoutMetric = useMemo(
+    () => layoutTextBoxMetrics.find((item) => item.box.id === selectedTextBoxId) ?? null,
+    [layoutTextBoxMetrics, selectedTextBoxId],
+  );
+
+  const selectedLayoutBoxWidth = selectedTextBox
+    ? Math.max(24, nativeCanvasWidth * (selectedTextBox.width_percent ?? DEFAULT_TEXT_BOX_WIDTH))
+    : 0;
+  const selectedLayoutBoxHeight = selectedTextBox
+    ? Math.max(24, (selectedLayoutMetric?.contentHeight ?? 0) + TEXT_BOX_VERTICAL_PADDING * 2)
+    : 0;
+
+  const layoutBounds = useMemo(() => {
+    if (layoutTextBoxMetrics.length === 0) {
+      return {
+        minX: 0,
+        minY: 0,
+        maxX: 0,
+        maxY: 0,
+        width: 0,
+        height: 0,
+      };
+    }
+
+    const bounds = layoutTextBoxMetrics.reduce(
+      (acc, metric) => {
+        const boxWidth = Math.max(
+          24,
+          nativeCanvasWidth * (metric.box.width_percent ?? DEFAULT_TEXT_BOX_WIDTH),
+        );
+        const boxHeight = Math.max(
+          24,
+          metric.contentHeight + TEXT_BOX_VERTICAL_PADDING * 2,
+        );
+        const x = nativeCanvasWidth * metric.box.x_percent;
+        const y = nativeCanvasHeight * metric.box.y_percent;
+        return {
+          minX: Math.min(acc.minX, x),
+          minY: Math.min(acc.minY, y),
+          maxX: Math.max(acc.maxX, x + boxWidth),
+          maxY: Math.max(acc.maxY, y + boxHeight),
+        };
+      },
+      {
+        minX: Number.POSITIVE_INFINITY,
+        minY: Number.POSITIVE_INFINITY,
+        maxX: Number.NEGATIVE_INFINITY,
+        maxY: Number.NEGATIVE_INFINITY,
+        },
+      );
+
+    return {
+      ...bounds,
+      width: Math.max(0, bounds.maxX - bounds.minX),
+      height: Math.max(0, bounds.maxY - bounds.minY),
+    };
+  }, [layoutTextBoxMetrics, nativeCanvasWidth, nativeCanvasHeight]);
+
+  const globalPositionX = selectedTextBox ? selectedTextBox.x_percent * nativeCanvasWidth : layoutBounds.minX;
+  const globalPositionY = selectedTextBox ? selectedTextBox.y_percent * nativeCanvasHeight : layoutBounds.minY;
+  const globalPositionXMax = selectedTextBox
+    ? Math.max(0, nativeCanvasWidth - selectedLayoutBoxWidth)
+    : Math.max(0, nativeCanvasWidth - layoutBounds.width);
+  const globalPositionYMax = selectedTextBox
+    ? Math.max(0, nativeCanvasHeight - selectedLayoutBoxHeight)
+    : Math.max(0, nativeCanvasHeight - layoutBounds.height);
+
+  const autosavePayload = useMemo(
+    () => ({
+      activeCanvasKey,
+      background_image_uri: backgroundImageUri,
+      image_opacity: imageOpacity,
+      font_size: selectedTextBox?.font_size ?? fontSize,
+      font_color: selectedTextBox?.font_color ?? fontColor,
+      bg_color: bgColor,
+      font_family: selectedTextBox?.font_family ?? fontFamily,
+      font_shadow: selectedTextBox?.font_shadow ?? fontShadow,
+      font_weight: selectedTextBox?.font_weight ?? fontWeight,
+      text_align: selectedTextBox?.text_align ?? textAlign,
+      quote_text: quoteText,
+      text_boxes: textBoxes,
+      text_x_percent: selectedTextBox?.x_percent ?? textBoxes[0]?.x_percent ?? textXPercent,
+      text_y_percent: selectedTextBox?.y_percent ?? textBoxes[0]?.y_percent ?? textYPercent,
+    }),
+    [
+      activeCanvasKey,
+      backgroundImageUri,
+      imageOpacity,
+      selectedTextBox?.font_size,
+      selectedTextBox?.font_color,
+      selectedTextBox?.font_family,
+      selectedTextBox?.font_shadow,
+      selectedTextBox?.font_weight,
+      selectedTextBox?.text_align,
+      selectedTextBox?.x_percent,
+      selectedTextBox?.y_percent,
+      fontSize,
+      fontColor,
+      bgColor,
+      fontFamily,
+      fontShadow,
+      fontWeight,
+      textAlign,
+      quoteText,
+      textBoxes,
+      textXPercent,
+      textYPercent,
+    ],
+  );
+
+  const autosavePayloadKey = useMemo(() => JSON.stringify(autosavePayload), [autosavePayload]);
+
+  useEffect(() => {
+    if (!onSave) {
+      return;
+    }
+
+    if (initialSaveKeyRef.current === null) {
+      initialSaveKeyRef.current = autosavePayloadKey;
+      return;
+    }
+
+    if (autosavePayloadKey === initialSaveKeyRef.current) {
+      return;
+    }
+
+    if (saveTimerRef.current) {
+      clearTimeout(saveTimerRef.current);
+    }
+
+    setSaveStatus('saving');
+    saveTimerRef.current = setTimeout(async () => {
+      try {
+        await onSave(autosavePayload);
+        initialSaveKeyRef.current = autosavePayloadKey;
+        setSaveStatus('saved');
+      } catch (error) {
+        console.warn('Autosave failed', error);
+        setSaveStatus('error');
+      }
+    }, 900);
+
+    return () => {
+      if (saveTimerRef.current) {
+        clearTimeout(saveTimerRef.current);
+        saveTimerRef.current = null;
+      }
+    };
+  }, [autosavePayload, autosavePayloadKey, onSave]);
+
+  const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+
+  const exportFormats: Record<ExportFormat, { label: string; extension: string; mime: string; skiaFormat: ImageFormat; quality: number }> = {
+    png: { label: 'PNG', extension: 'png', mime: 'image/png', skiaFormat: ImageFormat.PNG, quality: 100 },
+    jpeg: { label: 'JPEG', extension: 'jpeg', mime: 'image/jpeg', skiaFormat: ImageFormat.JPEG, quality: 92 },
+    jpg: { label: 'JPG', extension: 'jpg', mime: 'image/jpeg', skiaFormat: ImageFormat.JPEG, quality: 92 },
+  };
+
+  const renderCanvasContent = (metrics: typeof layoutTextBoxMetrics, renderWidth: number, renderHeight: number) => (
+    <>
+      <Rect x={0} y={0} width={renderWidth} height={renderHeight} color={bgColor} />
+      {image && (
+        <SkiaImage
+          image={image}
+          opacity={imageOpacity}
+          fit="cover"
+          x={0}
+          y={0}
+          width={renderWidth}
+          height={renderHeight}
+        />
+      )}
+      {textBoxes.map((box, index) => {
+        const metric = metrics[index];
+        const paragraph = metric?.paragraph;
+        const boxWidth = Math.max(24, renderWidth * (box.width_percent ?? DEFAULT_TEXT_BOX_WIDTH));
+        const x = renderWidth * box.x_percent;
+        const y = renderHeight * box.y_percent;
+
+        return (
+          <Paragraph
+            key={box.id}
+            paragraph={paragraph}
+            x={x + TEXT_BOX_HORIZONTAL_PADDING}
+            y={y + TEXT_BOX_VERTICAL_PADDING}
+            width={Math.max(12, boxWidth - TEXT_BOX_HORIZONTAL_PADDING * 2)}
+          />
+        );
+      })}
+    </>
+  );
+
+  const renderProgressPath = (progress: number) => {
+    const size = 112;
+    const strokeWidth = 10;
+    const path = Skia.Path.Make();
+    path.addOval({
+      x: strokeWidth / 2,
+      y: strokeWidth / 2,
+      width: size - strokeWidth,
+      height: size - strokeWidth,
+    });
+
+    return { path, size, strokeWidth, progress };
+  };
+
+  const getRNFS = () => require('react-native-fs') as typeof import('react-native-fs');
+
+  const getExportDirectory = async () => {
+    const RNFS = getRNFS();
+    if (Platform.OS !== 'android') {
+      return RNFS.DocumentDirectoryPath;
+    }
+
+    const androidVersion = Number(Platform.Version);
+    const appBaseDirectory = RNFS.ExternalDirectoryPath || RNFS.DocumentDirectoryPath;
+    const picturesBaseDirectory = RNFS.PicturesDirectoryPath || RNFS.ExternalDirectoryPath || RNFS.DocumentDirectoryPath;
+    const appExportDirectory = `${appBaseDirectory}/note2quotes/quotes`;
+
+    if (androidVersion < 29) {
+      const permission = await PermissionsAndroid.request(
+        PermissionsAndroid.PERMISSIONS.WRITE_EXTERNAL_STORAGE,
+      );
+
+      if (permission === PermissionsAndroid.RESULTS.GRANTED) {
+        return `${picturesBaseDirectory}/note2quotes/quotes`;
+      }
+    }
+
+    return appExportDirectory;
+  };
+
+  const handleExport = async () => {
+    if (exporting) {
+      return;
+    }
+
+    try {
+      const RNFS = getRNFS();
+      const format = exportFormats[exportFormat];
+      setExporting(true);
+      setExportProgress(5);
+      setExportStatus('Preparing export...');
+
+      await sleep(120);
+
+      setExportProgress(20);
+      setExportStatus('Rendering quote...');
+      await sleep(120);
+
+      const snapshot = await exportCanvasRef.current?.makeImageSnapshotAsync();
+      if (!snapshot) {
+        throw new Error('Could not capture the quote canvas');
+      }
+
+      setExportProgress(55);
+      setExportStatus('Encoding file...');
+      await sleep(120);
+
+      const fileName = `quote_${Date.now()}.${format.extension}`;
+      const exportDirectory = await getExportDirectory();
+      await RNFS.mkdir(exportDirectory);
+      const filePath = `${exportDirectory}/${fileName}`;
+      const base64 = snapshot.encodeToBase64(format.skiaFormat, format.quality);
+
+      setExportProgress(80);
+      setExportStatus('Writing file...');
+      await RNFS.writeFile(filePath, base64, 'base64');
+
+      if (Platform.OS === 'android' && exportDirectory.includes('/Pictures/') && typeof RNFS.scanFile === 'function') {
+        await RNFS.scanFile(filePath);
+      }
+
+      setExportProgress(100);
+      setExportStatus('Export complete');
+      Alert.alert('Exported', `Saved as ${fileName}\n\n${filePath}`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unable to export the quote';
+      const hint = /RNFSManager|RNFSFileTypeRegular|native module/i.test(message)
+        ? '\n\nThe native RNFS module is not registered in this app session. Rebuild the Android app after installing native dependencies.'
+        : /EPERM|permission|not permitted/i.test(message)
+          ? '\n\nAndroid is blocking direct writes to public Pictures on this version. The app will fall back to app storage unless MediaStore is used.'
+        : '';
+      Alert.alert('Export failed', `${message}${hint}`);
+      setExportStatus('Export failed');
+    } finally {
+      setExporting(false);
+      setTimeout(() => {
+        setExportProgress(0);
+        setExportStatus('Ready to export');
+      }, 900);
+    }
+  };
 
   
 
@@ -658,15 +971,17 @@ const imageUri = backgroundImageUri || require("../../assets/test.jpg");
         return (
           <Pressable style={styles.modalBackdrop} onPress={() => setModalVisible(false)}>
             <View style={[styles.modalContent, { height: screenHeight * 0.3 }]}>
+                  <Text style={styles.sliderLabelText}>Font Size</Text>
                   <Slider
                 style={{width: 200, height: 40}}
-                minimumValue={10}
-                maximumValue={30}
+                minimumValue={8}
+                maximumValue={Math.max(48, Math.round(nativeCanvasHeight * 0.14))}
                 value={resolvedTextSize}
                 minimumTrackTintColor="#FFFFFF"
                 maximumTrackTintColor="#000000"
                 onValueChange={(value) => setTextSize(value)}
                 />
+                <Text style={styles.sliderPercentText}>{Math.round(resolvedTextSize)}px</Text>
                 </View>
           </Pressable>
         );
@@ -916,13 +1231,13 @@ const imageUri = backgroundImageUri || require("../../assets/test.jpg");
                 <Slider
                   style={styles.sliderLarge}
                   minimumValue={0}
-                  maximumValue={1}
-                  value={selectedTextBox ? selectedTextBox.x_percent : textXPercent}
+                  maximumValue={globalPositionXMax}
+                  value={globalPositionX}
                   minimumTrackTintColor="#1a73e8"
                   maximumTrackTintColor="#ddd"
-                  onValueChange={setTextX}
+                  onValueChange={(value) => setTextX(value / nativeCanvasWidth)}
                 />
-                <Text style={styles.sliderPercentText}>{Math.round((selectedTextBox ? selectedTextBox.x_percent : textXPercent) * 100)}%</Text>
+                <Text style={styles.sliderPercentText}>{Math.round(globalPositionX)}px</Text>
               </View>
 
               <View style={styles.sliderSection}>
@@ -930,13 +1245,13 @@ const imageUri = backgroundImageUri || require("../../assets/test.jpg");
                 <Slider
                   style={styles.sliderLarge}
                   minimumValue={0}
-                  maximumValue={1}
-                  value={selectedTextBox ? selectedTextBox.y_percent : textYPercent}
+                  maximumValue={globalPositionYMax}
+                  value={globalPositionY}
                   minimumTrackTintColor="#1a73e8"
                   maximumTrackTintColor="#ddd"
-                  onValueChange={setTextY}
+                  onValueChange={(value) => setTextY(value / nativeCanvasHeight)}
                 />
-                <Text style={styles.sliderPercentText}>{Math.round((selectedTextBox ? selectedTextBox.y_percent : textYPercent) * 100)}%</Text>
+                <Text style={styles.sliderPercentText}>{Math.round(globalPositionY)}px</Text>
               </View>
             </View>
           </Pressable>
@@ -960,7 +1275,18 @@ const imageUri = backgroundImageUri || require("../../assets/test.jpg");
     <View style={styles.container}>
       <Appbar.Header>
         {onBack ? <Appbar.BackAction onPress={onBack} /> : null}
-        <Appbar.Content title={title} />
+        <Appbar.Content
+          title={title}
+          subtitle={
+            saveStatus === 'saving'
+              ? 'Saving...'
+              : saveStatus === 'saved'
+                ? 'Saved'
+                : saveStatus === 'error'
+                  ? 'Autosave failed'
+                  : 'Autosave on'
+          }
+        />
         {onDelete ? (
           <Appbar.Action
             icon="delete-outline"
@@ -972,105 +1298,81 @@ const imageUri = backgroundImageUri || require("../../assets/test.jpg");
             }}
           />
         ) : null}
-        {onSave ? (
-          <Appbar.Action
-            icon="content-save-outline"
-            onPress={() => {
-              onSave({
-                activeCanvasKey,
-                background_image_uri: backgroundImageUri,
-                image_opacity: imageOpacity,
-                font_size: selectedTextBox?.font_size ?? fontSize,
-                font_color: selectedTextBox?.font_color ?? fontColor,
-                bg_color: bgColor,
-                font_family: selectedTextBox?.font_family ?? fontFamily,
-                font_shadow: selectedTextBox?.font_shadow ?? fontShadow,
-                font_weight: selectedTextBox?.font_weight ?? fontWeight,
-                text_align: selectedTextBox?.text_align ?? textAlign,
-                quote_text: quoteText,
-                text_boxes: textBoxes,
-                text_x_percent: selectedTextBox?.x_percent ?? textBoxes[0]?.x_percent ?? textXPercent,
-                text_y_percent: selectedTextBox?.y_percent ?? textBoxes[0]?.y_percent ?? textYPercent,
-              });
-            }}
-          />
-        ) : null}
+        <Appbar.Action
+          icon="export"
+          onPress={() => {
+            setExportModalVisible(true);
+            setExportMenuVisible(false);
+          }}
+        />
       </Appbar.Header>
 
       <View style={[styles.canvas, { width: canvasWidth, height: canvasHeight }]}>
-        <Canvas style={{ width: canvasWidth, height: canvasHeight }}>
-          <Rect x={0} y={0} width={canvasWidth} height={canvasHeight} color={bgColor} />
-          {image && (
-            <SkiaImage
-              image={image}
-              //make control for opacity and fit in the future
-              opacity={imageOpacity}
-              fit="cover"
-              x={0}
-              y={0}
-              width={canvasWidth}
-              height={canvasHeight}
-            />
-          )}
-          {textBoxes.map((box, index) => {
-            const metric = textBoxMetrics[index];
-            const paragraph = metric?.paragraph;
-            const boxWidth = Math.max(24, canvasWidth * (box.width_percent ?? DEFAULT_TEXT_BOX_WIDTH));
-            const boxHeight = Math.max(
-              24,
-              (metric?.contentHeight ?? 0) + TEXT_BOX_VERTICAL_PADDING * 2,
-            );
-            const x = canvasWidth * box.x_percent;
-            const y = canvasHeight * box.y_percent;
+        <View
+          style={[
+            styles.previewStage,
+            {
+              width: nativeCanvasWidth,
+              height: nativeCanvasHeight,
+              transform: [{ scale: previewScale }],
+            },
+          ]}
+          pointerEvents="box-none"
+        >
+          <Canvas style={{ width: nativeCanvasWidth, height: nativeCanvasHeight }}>
+            {renderCanvasContent(layoutTextBoxMetrics, nativeCanvasWidth, nativeCanvasHeight)}
+          </Canvas>
+          <View style={StyleSheet.absoluteFill} pointerEvents="box-none">
+            <Pressable style={StyleSheet.absoluteFill} onPress={clearTextFocus} />
+            {textBoxes.map((box) => {
+              const isSelected = box.id === selectedTextBoxId;
+              const metric = layoutTextBoxMetrics.find((item) => item.box.id === box.id);
+              const boxWidth = Math.max(24, nativeCanvasWidth * (box.width_percent ?? DEFAULT_TEXT_BOX_WIDTH));
+              const boxHeight = Math.max(24, (metric?.contentHeight ?? 0) + TEXT_BOX_VERTICAL_PADDING * 2);
+              const x = nativeCanvasWidth * box.x_percent;
+              const y = nativeCanvasHeight * box.y_percent;
 
-            return (
-              <Paragraph
-                key={box.id}
-                paragraph={paragraph}
-                x={x + TEXT_BOX_HORIZONTAL_PADDING}
-                y={y + TEXT_BOX_VERTICAL_PADDING}
-                width={Math.max(12, boxWidth - TEXT_BOX_HORIZONTAL_PADDING * 2)}
-              />
-            );
-          })}
-        </Canvas>
-        <View style={StyleSheet.absoluteFill} pointerEvents="box-none">
-          <Pressable style={StyleSheet.absoluteFill} onPress={clearTextFocus} />
-          {textBoxes.map((box) => {
-            const isSelected = box.id === selectedTextBoxId;
-            const metric = textBoxMetrics.find((item) => item.box.id === box.id);
-            const boxWidth = Math.max(24, canvasWidth * (box.width_percent ?? DEFAULT_TEXT_BOX_WIDTH));
-            const boxHeight = Math.max(24, (metric?.contentHeight ?? 0) + TEXT_BOX_VERTICAL_PADDING * 2);
-            const x = canvasWidth * box.x_percent;
-            const y = canvasHeight * box.y_percent;
-
-            return (
-              <Pressable
-                key={box.id}
-                onPress={() => focusTextBox(box.id)}
-                style={[
-                  styles.textBoxOverlay,
-                  {
-                    left: x,
-                    top: y,
-                    width: boxWidth,
-                    height: boxHeight,
-                  },
-                  isSelected && styles.textBoxOverlaySelected,
-                ]}
-              >
-                {isSelected ? (
-                  <>
-                    <View style={styles.selectionDotTopLeft} />
-                    <View style={styles.selectionDotTopRight} />
-                    <View style={styles.selectionDotBottomLeft} />
-                    <View style={styles.selectionDotBottomRight} />
-                  </>
-                ) : null}
-              </Pressable>
-            );
-          })}
+              return (
+                <Pressable
+                  key={box.id}
+                  onPress={() => focusTextBox(box.id)}
+                  style={[
+                    styles.textBoxOverlay,
+                    {
+                      left: x,
+                      top: y,
+                      width: boxWidth,
+                      height: boxHeight,
+                    },
+                    isSelected && styles.textBoxOverlaySelected,
+                  ]}
+                >
+                  {isSelected ? (
+                    <>
+                      <View style={styles.selectionDotTopLeft} />
+                      <View style={styles.selectionDotTopRight} />
+                      <View style={styles.selectionDotBottomLeft} />
+                      <View style={styles.selectionDotBottomRight} />
+                    </>
+                  ) : null}
+                </Pressable>
+              );
+            })}
+          </View>
         </View>
+        <Canvas
+          ref={exportCanvasRef}
+          pointerEvents="none"
+          style={{
+            position: 'absolute',
+            left: -10000,
+            top: -10000,
+            width: nativeCanvasWidth,
+            height: nativeCanvasHeight,
+          }}
+        >
+          {renderCanvasContent(layoutTextBoxMetrics, nativeCanvasWidth, nativeCanvasHeight)}
+        </Canvas>
       </View>
         <View style={styles.settingsContainer}>
           <ScrollView
@@ -1107,6 +1409,118 @@ const imageUri = backgroundImageUri || require("../../assets/test.jpg");
       >
         {renderModalContent()}
       </Modal>
+      <Modal
+        visible={exportModalVisible}
+        animationType="fade"
+        transparent={true}
+        onRequestClose={() => {
+          if (!exporting) {
+            setExportModalVisible(false);
+            setExportMenuVisible(false);
+          }
+        }}
+      >
+        <View style={styles.exportBackdrop}>
+          <Pressable
+            style={StyleSheet.absoluteFill}
+            onPress={() => {
+              if (!exporting) {
+                setExportModalVisible(false);
+                setExportMenuVisible(false);
+              }
+            }}
+          />
+          <View style={styles.exportSheet}>
+            <Text style={styles.modalTitle}>Export Quote</Text>
+            <Text style={styles.exportDescription}>
+              Choose the format, then export the current quote with all saved settings.
+            </Text>
+
+            <View style={styles.exportField}>
+              <Text style={styles.exportFieldLabel}>File type</Text>
+              <Pressable
+                style={styles.exportDropdown}
+                onPress={() => {
+                  if (!exporting) {
+                    setExportMenuVisible((current) => !current);
+                  }
+                }}
+              >
+                <Text style={styles.exportDropdownText}>{exportFormats[exportFormat].label}</Text>
+                <Icon source={exportMenuVisible ? 'chevron-up' : 'chevron-down'} size={20} />
+              </Pressable>
+              {exportMenuVisible ? (
+                <View style={styles.exportMenu}>
+                  {(['png', 'jpeg', 'jpg'] as ExportFormat[]).map((format) => (
+                    <Pressable
+                      key={format}
+                      style={[styles.exportMenuItem, exportFormat === format && styles.exportMenuItemActive]}
+                      onPress={() => {
+                        setExportFormat(format);
+                        setExportMenuVisible(false);
+                      }}
+                    >
+                      <Text style={styles.exportMenuItemText}>{exportFormats[format].label}</Text>
+                      {exportFormat === format ? <Icon source="check" size={18} color="#1a73e8" /> : null}
+                    </Pressable>
+                  ))}
+                </View>
+              ) : null}
+            </View>
+
+            <View style={styles.exportProgressWrap}>
+              {(() => {
+                const progressConfig = renderProgressPath(exportProgress);
+                return (
+                  <>
+                    <Canvas style={{ width: progressConfig.size, height: progressConfig.size }}>
+                      <Path
+                        path={progressConfig.path}
+                        start={0}
+                        end={1}
+                        stroke={{ width: progressConfig.strokeWidth, cap: StrokeCap.Round }}
+                        color="rgba(26, 115, 232, 0.15)"
+                      />
+                      <Path
+                        path={progressConfig.path}
+                        start={0}
+                        end={Math.max(0, Math.min(1, progressConfig.progress / 100))}
+                        stroke={{ width: progressConfig.strokeWidth, cap: StrokeCap.Round }}
+                        color="#1a73e8"
+                      />
+                    </Canvas>
+                    <View style={styles.exportProgressCenter}>
+                      <Text style={styles.exportProgressText}>{Math.round(exportProgress)}%</Text>
+                    </View>
+                  </>
+                );
+              })()}
+            </View>
+
+            <Text style={styles.exportStatusText}>{exportStatus}</Text>
+
+            <View style={styles.exportActions}>
+              <Pressable
+                style={[styles.exportActionButton, styles.exportCancelButton, exporting && styles.exportActionDisabled]}
+                disabled={exporting}
+                onPress={() => {
+                  setExportModalVisible(false);
+                  setExportMenuVisible(false);
+                }}
+              >
+                <Text style={styles.exportCancelText}>Close</Text>
+              </Pressable>
+              <Pressable
+                style={[styles.exportActionButton, styles.exportPrimaryButton, exporting && styles.exportActionDisabled]}
+                disabled={exporting}
+                onPress={handleExport}
+              >
+                <Text style={styles.exportPrimaryText}>{exporting ? 'Exporting...' : 'Export'}</Text>
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </>
   )
 }
@@ -1124,6 +1538,12 @@ const styles = StyleSheet.create({
     marginRight: '5%',
     position: 'relative',
     overflow: 'hidden',
+  },
+  previewStage: {
+    position: 'absolute',
+    left: 0,
+    top: 0,
+    transformOrigin: 'top left',
   },
   textBoxOverlay: {
     position: 'absolute',
@@ -1290,6 +1710,143 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.5)',
     justifyContent: 'flex-end',
+  },
+  exportBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.55)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  exportSheet: {
+    width: '100%',
+    maxWidth: 420,
+    backgroundColor: '#fff',
+    borderRadius: 24,
+    padding: 20,
+    shadowColor: '#000',
+    shadowOpacity: 0.18,
+    shadowRadius: 18,
+    shadowOffset: { width: 0, height: 10 },
+    elevation: 8,
+  },
+  exportDescription: {
+    fontSize: 14,
+    lineHeight: 20,
+    color: '#555',
+    textAlign: 'center',
+    marginBottom: 16,
+  },
+  exportField: {
+    marginBottom: 16,
+    zIndex: 2,
+  },
+  exportFieldLabel: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#444',
+    marginBottom: 8,
+  },
+  exportDropdown: {
+    minHeight: 48,
+    borderWidth: 1,
+    borderColor: '#d7dbe2',
+    borderRadius: 14,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#f8fafc',
+  },
+  exportDropdownText: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#222',
+  },
+  exportMenu: {
+    marginTop: 8,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+    overflow: 'hidden',
+    backgroundColor: '#fff',
+  },
+  exportMenuItem: {
+    minHeight: 46,
+    paddingHorizontal: 14,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    borderBottomWidth: 1,
+    borderBottomColor: '#f1f5f9',
+  },
+  exportMenuItemActive: {
+    backgroundColor: '#e8f0fe',
+  },
+  exportMenuItemText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#2d3748',
+  },
+  exportProgressWrap: {
+    alignSelf: 'center',
+    width: 112,
+    height: 112,
+    marginTop: 12,
+    marginBottom: 12,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  exportProgressCenter: {
+    position: 'absolute',
+    left: 0,
+    top: 0,
+    right: 0,
+    bottom: 0,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  exportProgressText: {
+    fontSize: 20,
+    fontWeight: '800',
+    color: '#1a73e8',
+  },
+  exportStatusText: {
+    fontSize: 13,
+    color: '#667085',
+    textAlign: 'center',
+    marginBottom: 18,
+  },
+  exportActions: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  exportActionButton: {
+    flex: 1,
+    minHeight: 48,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  exportCancelButton: {
+    backgroundColor: '#eef2f7',
+  },
+  exportPrimaryButton: {
+    backgroundColor: '#1a73e8',
+  },
+  exportActionDisabled: {
+    opacity: 0.6,
+  },
+  exportCancelText: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#344054',
+  },
+  exportPrimaryText: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#fff',
   },
   modalContent: {
     backgroundColor: '#fff',

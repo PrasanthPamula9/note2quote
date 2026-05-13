@@ -22,10 +22,12 @@ export default function QuotesContainer({
   const { quotes, createQuote, updateQuote, deleteQuote } = useQuotesStore();
   const [viewState, setViewState] = useState<'gallery' | 'editor'>('gallery');
   const [selectedQuote, setSelectedQuote] = useState<Quote | null>(null);
+  const [editorSessionKey, setEditorSessionKey] = useState<string>('new-quote');
   const handledDraftId = useRef<number | null>(null);
 
   const handleAddQuote = () => {
     setSelectedQuote(null);
+    setEditorSessionKey(`new-${Date.now()}`);
     setViewState('editor');
   };
 
@@ -43,6 +45,7 @@ export default function QuotesContainer({
         background_image_uri: null,
       });
       setSelectedQuote(savedQuote);
+      setEditorSessionKey(savedQuote.id);
       setViewState('editor');
       onDraftConsumed?.();
     };
@@ -52,6 +55,7 @@ export default function QuotesContainer({
 
   const handleQuotePress = (quote: Quote) => {
     setSelectedQuote(quote);
+    setEditorSessionKey(quote.id);
     setViewState('editor');
   };
 
@@ -93,9 +97,7 @@ export default function QuotesContainer({
       text_y_percent,
     } = config;
     const trimmedText = quote_text.trim();
-    if (!trimmedText) {
-      return;
-    }
+    const resolvedQuoteText = trimmedText || selectedQuote?.quote_text || '';
 
     const editorConfig: Quote['editor_config'] = {
       activeCanvasKey,
@@ -108,7 +110,7 @@ export default function QuotesContainer({
       font_shadow,
       font_weight,
       text_align,
-      quote_text: trimmedText,
+      quote_text: resolvedQuoteText,
       text_boxes,
       text_x_percent,
       text_y_percent,
@@ -117,7 +119,7 @@ export default function QuotesContainer({
     if (selectedQuote) {
       const savedQuote = await updateQuote({
         ...selectedQuote,
-        quote_text: trimmedText,
+        quote_text: resolvedQuoteText,
         background_image_uri,
         editor_config: editorConfig,
       });
@@ -126,15 +128,13 @@ export default function QuotesContainer({
         ...savedQuote,
       });
     } else {
-      await createQuote({
-        quote_text: trimmedText,
+      const savedQuote = await createQuote({
+        quote_text: resolvedQuoteText,
         background_image_uri,
         editor_config: editorConfig,
       });
+      setSelectedQuote(savedQuote);
     }
-
-    setSelectedQuote(null);
-    setViewState('gallery');
   };
 
   const handleDeleteQuote = async (quoteId: string) => {
@@ -155,7 +155,7 @@ export default function QuotesContainer({
 
       {viewState === 'editor' && (
         <QuotesView
-          key={selectedQuote?.id ?? 'new-quote'}
+          key={editorSessionKey}
           title={selectedQuote ? 'Edit Quote' : 'New Quote'}
           initialQuoteText={selectedQuote?.quote_text ?? ''}
           initialBackgroundImageUri={selectedQuote?.background_image_uri ?? null}
