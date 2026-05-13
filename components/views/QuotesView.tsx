@@ -6,9 +6,9 @@ import {listFontFamilies} from "@shopify/react-native-skia";
 import {launchImageLibrary, launchCamera} from 'react-native-image-picker';
 import Slider from '@react-native-community/slider';
 import MaterialIcons from '@react-native-vector-icons/material-design-icons';
-import AntDesign from '@react-native-vector-icons/ant-design';
-import Ionicons from '@react-native-vector-icons/ionicons';
-import { Foundation } from '@react-native-vector-icons/foundation';
+// import AntDesign from '@react-native-vector-icons/ant-design';
+// import Ionicons from '@react-native-vector-icons/ionicons';
+// import { Foundation } from '@react-native-vector-icons/foundation';
 import ColorPickerComponent, { HueSlider, Panel1 } from 'reanimated-color-picker';
 import { QuoteEditorConfig, CanvasPresetKey } from '../../types/quotes';
 // ─── Canvas size presets ─────────────────────────────────────────────────────
@@ -185,12 +185,12 @@ export default function QuotesView({
   {
     name:"BackgroundColor",
     
-    icon:<Foundation name="bg-color"  size={20} />,
+    icon:<MaterialIcons name="select-color"  size={20} />,
     label:"Bg Color"
   },
   {
     name:"FontColor",
-    icon:<AntDesign name="font-color" size={24}/>,
+    icon:<MaterialIcons name="format-color-text" size={24}/>,
     label:"Font Color"
   },
   {
