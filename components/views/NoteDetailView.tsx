@@ -9,11 +9,13 @@ import {
   ScrollView,
   Modal,
   Pressable,
+  useWindowDimensions,
 } from 'react-native';
 import { Appbar, Menu, Portal } from 'react-native-paper';
 import MaterialIcons from '@react-native-vector-icons/material-design-icons';
 import { Note } from '../../types/notes';
 import SelectableNoteBodyView from '../native/SelectableNoteBodyView';
+import { getResponsiveMetrics } from '../utils/responsive';
 
 interface NoteDetailViewProps {
   note: Note;
@@ -30,6 +32,8 @@ export default function NoteDetailView({
   onDelete,
   onCreateQuote,
 }: NoteDetailViewProps) {
+  const { width, height } = useWindowDimensions();
+  const layout = getResponsiveMetrics(width, height);
   const [note, setNote] = useState<Note>(initialNote);
   const [isEditing, setIsEditing] = useState(false);
   const [menuVisible, setMenuVisible] = useState(false);
@@ -74,11 +78,14 @@ export default function NoteDetailView({
 
   return (
     <SafeAreaView style={styles.container}>
-      <Appbar.Header style={styles.header}>
+      <View style={[styles.frame, { maxWidth: layout.contentMaxWidth }]}>
+        <Appbar.Header
+          style={[styles.header, { paddingHorizontal: layout.pagePadding, marginTop: 8 }]}
+        >
         <Appbar.BackAction onPress={onBack} />
         <View style={styles.headerActions}>
           <TouchableOpacity style={styles.iconButton}>
-            <MaterialIcons name="share-outline" size={24} color="#000" />
+            <MaterialIcons name="share-outline" size={layout.isTablet ? 26 : 24} color="#000" />
           </TouchableOpacity>
           <Menu
             visible={menuVisible}
@@ -112,20 +119,20 @@ export default function NoteDetailView({
         </View>
       </Appbar.Header>
 
-      <View style={styles.metadata}>
-        <Text style={styles.metadataText}>
+      <View style={[styles.metadata, { paddingHorizontal: layout.pagePadding }]}>
+        <Text style={[styles.metadataText, { fontSize: layout.smallTextSize }]}>
           {formatDate(note.updated_at)} | {wordCount}
         </Text>
       </View>
 
       <ScrollView
         style={styles.content}
-        contentContainerStyle={styles.contentContainer}
+        contentContainerStyle={[styles.contentContainer, { paddingHorizontal: layout.pagePadding }]}
       >
         {isEditing ? (
           <>
             <TextInput
-              style={styles.titleInput}
+              style={[styles.titleInput, { fontSize: layout.titleSize }]}
               placeholder="Header"
               value={note.header}
               onChangeText={(text) =>
@@ -134,7 +141,7 @@ export default function NoteDetailView({
               placeholderTextColor="#ccc"
             />
             <TextInput
-              style={styles.contentInput}
+              style={[styles.contentInput, { fontSize: layout.bodySize }]}
               placeholder="Body"
               value={note.body}
               onChangeText={(text) =>
@@ -146,9 +153,12 @@ export default function NoteDetailView({
           </>
         ) : (
           <>
-            <Text style={styles.title}>{note.header}</Text>
+            <Text style={[styles.title, { fontSize: layout.titleSize }]}>{note.header}</Text>
             <SelectableNoteBodyView
-              style={styles.noteBodyNative}
+              style={[
+                styles.noteBodyNative,
+                { minHeight: layout.isTablet ? 260 : 180 },
+              ]}
               text={note.body}
               onCreateQuote={(event) => {
                 onCreateQuote?.(event.nativeEvent.text);
@@ -160,21 +170,21 @@ export default function NoteDetailView({
 
       {!isEditing && note.body.trim() ? (
         <TouchableOpacity
-          style={styles.createQuoteButton}
+          style={[styles.createQuoteButton, { marginHorizontal: layout.pagePadding }]}
           onPress={() => onCreateQuote?.(note.body.trim())}
           activeOpacity={0.8}
         >
-          <Text style={styles.createQuoteButtonText}>Create Quote</Text>
+          <Text style={[styles.createQuoteButtonText, { fontSize: layout.bodySize }]}>Create Quote</Text>
         </TouchableOpacity>
       ) : null}
 
       {isEditing && (
         <TouchableOpacity
-          style={styles.saveButton}
+          style={[styles.saveButton, { marginHorizontal: layout.pagePadding }]}
           onPress={handleSave}
           activeOpacity={0.8}
         >
-          <Text style={styles.saveButtonText}>Save Note</Text>
+          <Text style={[styles.saveButtonText, { fontSize: layout.bodySize }]}>Save Note</Text>
         </TouchableOpacity>
       )}
 
@@ -184,14 +194,14 @@ export default function NoteDetailView({
           transparent
           animationType="fade"
           onRequestClose={() => setDeleteModalVisible(false)}
-        >
+          >
           <Pressable
             style={styles.modalOverlay}
             onPress={() => setDeleteModalVisible(false)}
           >
-            <View style={styles.modalContent}>
-              <Text style={styles.modalTitle}>Delete note?</Text>
-              <Text style={styles.modalMessage}>
+            <View style={[styles.modalContent, { width: layout.modalWidth }]}>
+              <Text style={[styles.modalTitle, { fontSize: layout.bodySize + 2 }]}>Delete note?</Text>
+              <Text style={[styles.modalMessage, { fontSize: layout.subtitleSize }]}>
                 This note will be permanently deleted.
               </Text>
               <View style={styles.modalButtons}>
@@ -212,6 +222,7 @@ export default function NoteDetailView({
           </Pressable>
         </Modal>
       </Portal>
+      </View>
     </SafeAreaView>
   );
 }
@@ -220,6 +231,11 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#fff',
+  },
+  frame: {
+    flex: 1,
+    alignSelf: 'center',
+    width: '100%',
   },
   header: {
     backgroundColor: '#fff',
@@ -250,13 +266,11 @@ const styles = StyleSheet.create({
   },
   content: {
     flex: 1,
-    padding: 16,
   },
   contentContainer: {
     paddingBottom: 20,
   },
   title: {
-    fontSize: 24,
     fontWeight: '600',
     color: '#000',
     marginBottom: 16,
@@ -278,8 +292,6 @@ const styles = StyleSheet.create({
     lineHeight: 24,
   },
   noteBodyNative: {
-    minHeight: 180,
-    fontSize: 16,
     color: '#333',
     lineHeight: 24,
     marginTop: 2,
@@ -328,8 +340,8 @@ const styles = StyleSheet.create({
     backgroundColor: '#fff',
     borderRadius: 12,
     padding: 24,
-    width: '80%',
-    maxWidth: 400,
+    width: '100%',
+    maxWidth: 520,
   },
   modalTitle: {
     fontSize: 18,

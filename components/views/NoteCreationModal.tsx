@@ -7,9 +7,11 @@ import {
   TextInput,
   TouchableOpacity,
   SafeAreaView,
+  useWindowDimensions,
 } from 'react-native';
 import MaterialIcons from '@react-native-vector-icons/material-design-icons';
 import { Note } from '../../types/notes';
+import { getResponsiveMetrics } from '../utils/responsive';
 
 interface NoteCreationModalProps {
   visible: boolean;
@@ -22,6 +24,8 @@ export default function NoteCreationModal({
   onClose,
   onCreate,
 }: NoteCreationModalProps) {
+  const { width, height } = useWindowDimensions();
+  const layout = getResponsiveMetrics(width, height);
   const [header, setHeader] = useState('');
   const [body, setBody] = useState('');
 
@@ -46,24 +50,25 @@ export default function NoteCreationModal({
   return (
     <Modal visible={visible} animationType="slide" onRequestClose={handleClose}>
       <SafeAreaView style={styles.container}>
+        <View style={[styles.sheet, { maxWidth: layout.modalWidth }]}>
         {/* Header */}
-        <View style={styles.header}>
+        <View style={[styles.header, { paddingHorizontal: layout.pagePadding, paddingVertical: layout.pagePadding }]}>
           <TouchableOpacity onPress={handleClose}>
-            <MaterialIcons name="close" size={24} color="#000" />
+            <MaterialIcons name="close" size={layout.isTablet ? 26 : 24} color="#000" />
           </TouchableOpacity>
           <TouchableOpacity
             style={[styles.saveButton, !header.trim() && !body.trim() && styles.saveButtonDisabled]}
             onPress={handleCreate}
             disabled={!header.trim() && !body.trim()}
           >
-            <Text style={styles.saveButtonText}>Save</Text>
+            <Text style={[styles.saveButtonText, { fontSize: layout.subtitleSize }]}>Save</Text>
           </TouchableOpacity>
         </View>
 
         {/* Content */}
-        <View style={styles.content}>
+        <View style={[styles.content, { paddingHorizontal: layout.pagePadding, paddingTop: layout.pagePadding }]}>
           <TextInput
-            style={styles.titleInput}
+            style={[styles.titleInput, { fontSize: layout.titleSize }]}
             placeholder="Header"
             value={header}
             onChangeText={setHeader}
@@ -72,7 +77,7 @@ export default function NoteCreationModal({
           />
           <View style={styles.divider} />
           <TextInput
-            style={styles.contentInput}
+            style={[styles.contentInput, { fontSize: layout.bodySize }]}
             placeholder="Body"
             value={body}
             onChangeText={setBody}
@@ -94,6 +99,7 @@ export default function NoteCreationModal({
             <MaterialIcons name="palette-outline" size={24} color="#666" />
           </TouchableOpacity>
         </View> */}
+        </View>
       </SafeAreaView>
     </Modal>
   );
@@ -103,6 +109,12 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#fff',
+    alignItems: 'center',
+  },
+  sheet: {
+    flex: 1,
+    width: '100%',
+    alignSelf: 'center',
   },
   header: {
     flexDirection: 'row',
@@ -129,8 +141,6 @@ const styles = StyleSheet.create({
   },
   content: {
     flex: 1,
-    paddingHorizontal: 16,
-    paddingTop: 16,
   },
   titleInput: {
     fontSize: 20,

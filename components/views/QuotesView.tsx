@@ -186,6 +186,10 @@ export default function QuotesView({
   const [exportProgress, setExportProgress] = useState(0);
   const [exportStatus, setExportStatus] = useState('Ready to export');
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
+  const [settingsScrollX, setSettingsScrollX] = useState(0);
+  const [settingsViewportWidth, setSettingsViewportWidth] = useState(0);
+  const [settingsContentWidth, setSettingsContentWidth] = useState(0);
+  const [templatesModalVisible, setTemplatesModalVisible] = useState(false);
   const [imageOpacity, setImageOpacity] = useState(
     initialEditorConfig?.image_opacity ?? DEFAULT_EDITOR_CONFIG.image_opacity,
   );
@@ -270,9 +274,15 @@ export default function QuotesView({
   // Scale the preset down to fit within 90 % of screen width and 70 % of
   // screen height while preserving the preset's aspect ratio.
   const { width: screenWidth, height: screenHeight } = useWindowDimensions();
-  const maxDisplayWidth = screenWidth * 0.9;
-  // Use 55 % so the dropdown trigger always has room below the canvas
-  const maxDisplayHeight = screenHeight * 0.55;
+  const isTablet = screenWidth >= 768;
+  const horizontalInset = isTablet ? 24 : 16;
+  const headerReserve = isTablet ? 92 : 112;
+  const maxDisplayWidth = Math.min(screenWidth - horizontalInset * 2, screenWidth * 0.9, 900);
+  const settingsPanelHeight = Math.max(isTablet ? 220 : 200, screenHeight * 0.28);
+  const maxDisplayHeight = Math.min(
+    screenHeight * (isTablet ? 0.56 : 0.44),
+    screenHeight - headerReserve - settingsPanelHeight - 24,
+  );
   const nativeCanvasWidth = activePreset.nativeWidth;
   const nativeCanvasHeight = activePreset.nativeHeight;
   const previewScale = Math.min(
@@ -282,6 +292,19 @@ export default function QuotesView({
 
   const canvasWidth = nativeCanvasWidth * previewScale;
   const canvasHeight = nativeCanvasHeight * previewScale;
+  const featureTileWidth = Math.floor((screenWidth - horizontalInset * 2 - 16) / 5);
+  const settingsTileWidth = Math.max(64, Math.min(isTablet ? 96 : 84, featureTileWidth));
+  const settingsTileHeight = isTablet ? 96 : 88;
+  const settingsStripHeight = settingsTileHeight * 2 + 16;
+  const scrollbarTrackWidth = Math.max(40, Math.floor((settingsTileWidth / 2) * 0.7));
+  const scrollbarThumbSize = 8;
+  const maxSettingsScroll = Math.max(0, settingsContentWidth - settingsViewportWidth);
+  const scrollbarUsableWidth = Math.max(0, scrollbarTrackWidth - 6 - scrollbarThumbSize);
+  const scrollbarThumbX =
+    maxSettingsScroll > 0
+      ? (settingsScrollX / maxSettingsScroll) * scrollbarUsableWidth
+      : 0;
+  const showSettingsScrollbar = maxSettingsScroll > 0;
   const FeaturesArray=[
   {
     name:"BackgroundImage",
@@ -345,6 +368,17 @@ export default function QuotesView({
     label:"Text Position"
   }
 ];
+  const templateOptions = [
+    { key: 'instagram_post_square', label: 'Square' },
+    { key: 'instagram_post_portrait', label: 'Portrait' },
+    { key: 'instagram_post_landscape', label: 'Landscape' },
+    { key: 'instagram_story', label: 'Story' },
+    { key: 'whatsapp_status', label: 'WhatsApp' },
+  ] as const;
+  const featureColumns: typeof FeaturesArray[] = [];
+  for (let i = 0; i < FeaturesArray.length; i += 2) {
+    featureColumns.push(FeaturesArray.slice(i, i + 2));
+  }
 const imageUri = backgroundImageUri || require("../../assets/test.jpg");
   const image = useImage(imageUri);
 
@@ -763,16 +797,19 @@ const imageUri = backgroundImageUri || require("../../assets/test.jpg");
 
   const getRNFS = () => require('react-native-fs') as typeof import('react-native-fs');
 
-  const getExportDirectory = async () => {
+  const getExportDirectories = async () => {
     const RNFS = getRNFS();
     if (Platform.OS !== 'android') {
-      return RNFS.DocumentDirectoryPath;
+      return {
+        preferred: RNFS.DocumentDirectoryPath,
+        fallback: RNFS.DocumentDirectoryPath,
+      };
     }
 
     const androidVersion = Number(Platform.Version);
     const appBaseDirectory = RNFS.ExternalDirectoryPath || RNFS.DocumentDirectoryPath;
-    const picturesBaseDirectory = RNFS.PicturesDirectoryPath || RNFS.ExternalDirectoryPath || RNFS.DocumentDirectoryPath;
-    const appExportDirectory = `${appBaseDirectory}/note2quotes/quotes`;
+    const appExportDirectory = `${appBaseDirectory}/notetoquote/quotes`;
+    const publicPicturesDirectory = `${RNFS.PicturesDirectoryPath}/notetoquote/quotes`;
 
     if (androidVersion < 29) {
       const permission = await PermissionsAndroid.request(
@@ -780,11 +817,17 @@ const imageUri = backgroundImageUri || require("../../assets/test.jpg");
       );
 
       if (permission === PermissionsAndroid.RESULTS.GRANTED) {
-        return `${picturesBaseDirectory}/note2quotes/quotes`;
+        return {
+          preferred: publicPicturesDirectory,
+          fallback: appExportDirectory,
+        };
       }
     }
 
-    return appExportDirectory;
+    return {
+      preferred: publicPicturesDirectory,
+      fallback: appExportDirectory,
+    };
   };
 
   const handleExport = async () => {
@@ -815,17 +858,32 @@ const imageUri = backgroundImageUri || require("../../assets/test.jpg");
       await sleep(120);
 
       const fileName = `quote_${Date.now()}.${format.extension}`;
-      const exportDirectory = await getExportDirectory();
-      await RNFS.mkdir(exportDirectory);
-      const filePath = `${exportDirectory}/${fileName}`;
+      const { preferred, fallback } = await getExportDirectories();
       const base64 = snapshot.encodeToBase64(format.skiaFormat, format.quality);
 
-      setExportProgress(80);
-      setExportStatus('Writing file...');
-      await RNFS.writeFile(filePath, base64, 'base64');
+      const writeExport = async (exportDirectory: string) => {
+        await RNFS.mkdir(exportDirectory);
+        const filePath = `${exportDirectory}/${fileName}`;
+        setExportProgress(80);
+        setExportStatus('Writing file...');
+        await RNFS.writeFile(filePath, base64, 'base64');
 
-      if (Platform.OS === 'android' && exportDirectory.includes('/Pictures/') && typeof RNFS.scanFile === 'function') {
-        await RNFS.scanFile(filePath);
+        if (Platform.OS === 'android' && exportDirectory.includes('/Pictures/') && typeof RNFS.scanFile === 'function') {
+          await RNFS.scanFile(filePath);
+        }
+
+        return filePath;
+      };
+
+      let filePath = '';
+      try {
+        filePath = await writeExport(preferred);
+      } catch (preferredError) {
+        if (preferred !== fallback) {
+          filePath = await writeExport(fallback);
+        } else {
+          throw preferredError;
+        }
       }
 
       setExportProgress(100);
@@ -1309,97 +1367,143 @@ const imageUri = backgroundImageUri || require("../../assets/test.jpg");
         />
       </Appbar.Header>
 
-      <View style={[styles.canvas, { width: canvasWidth, height: canvasHeight }]}>
+      <View style={[styles.canvasViewport, { paddingBottom: settingsPanelHeight }]}>
         <View
-          style={[
-            styles.previewStage,
-            {
+          style={[styles.canvas, { width: canvasWidth, height: canvasHeight, marginHorizontal: horizontalInset }]}
+        >
+          <View
+            style={[
+              styles.previewStage,
+              {
+                width: nativeCanvasWidth,
+                height: nativeCanvasHeight,
+                transform: [{ scale: previewScale }],
+              },
+            ]}
+            pointerEvents="box-none"
+          >
+            <Canvas style={{ width: nativeCanvasWidth, height: nativeCanvasHeight }}>
+              {renderCanvasContent(layoutTextBoxMetrics, nativeCanvasWidth, nativeCanvasHeight)}
+            </Canvas>
+            <View style={StyleSheet.absoluteFill} pointerEvents="box-none">
+              <Pressable style={StyleSheet.absoluteFill} onPress={clearTextFocus} />
+              {textBoxes.map((box) => {
+                const isSelected = box.id === selectedTextBoxId;
+                const metric = layoutTextBoxMetrics.find((item) => item.box.id === box.id);
+                const boxWidth = Math.max(24, nativeCanvasWidth * (box.width_percent ?? DEFAULT_TEXT_BOX_WIDTH));
+                const boxHeight = Math.max(24, (metric?.contentHeight ?? 0) + TEXT_BOX_VERTICAL_PADDING * 2);
+                const x = nativeCanvasWidth * box.x_percent;
+                const y = nativeCanvasHeight * box.y_percent;
+
+                return (
+                  <Pressable
+                    key={box.id}
+                    onPress={() => focusTextBox(box.id)}
+                    style={[
+                      styles.textBoxOverlay,
+                      {
+                        left: x,
+                        top: y,
+                        width: boxWidth,
+                        height: boxHeight,
+                      },
+                      isSelected && styles.textBoxOverlaySelected,
+                    ]}
+                  >
+                    {isSelected ? (
+                      <>
+                        <View style={styles.selectionDotTopLeft} />
+                        <View style={styles.selectionDotTopRight} />
+                        <View style={styles.selectionDotBottomLeft} />
+                        <View style={styles.selectionDotBottomRight} />
+                      </>
+                    ) : null}
+                  </Pressable>
+                );
+              })}
+            </View>
+          </View>
+          <Canvas
+            ref={exportCanvasRef}
+            pointerEvents="none"
+            style={{
+              position: 'absolute',
+              left: -10000,
+              top: -10000,
               width: nativeCanvasWidth,
               height: nativeCanvasHeight,
-              transform: [{ scale: previewScale }],
-            },
-          ]}
-          pointerEvents="box-none"
-        >
-          <Canvas style={{ width: nativeCanvasWidth, height: nativeCanvasHeight }}>
+            }}
+          >
             {renderCanvasContent(layoutTextBoxMetrics, nativeCanvasWidth, nativeCanvasHeight)}
           </Canvas>
-          <View style={StyleSheet.absoluteFill} pointerEvents="box-none">
-            <Pressable style={StyleSheet.absoluteFill} onPress={clearTextFocus} />
-            {textBoxes.map((box) => {
-              const isSelected = box.id === selectedTextBoxId;
-              const metric = layoutTextBoxMetrics.find((item) => item.box.id === box.id);
-              const boxWidth = Math.max(24, nativeCanvasWidth * (box.width_percent ?? DEFAULT_TEXT_BOX_WIDTH));
-              const boxHeight = Math.max(24, (metric?.contentHeight ?? 0) + TEXT_BOX_VERTICAL_PADDING * 2);
-              const x = nativeCanvasWidth * box.x_percent;
-              const y = nativeCanvasHeight * box.y_percent;
-
-              return (
-                <Pressable
-                  key={box.id}
-                  onPress={() => focusTextBox(box.id)}
+        </View>
+      </View>
+      <View style={[styles.settingsContainer, { height: settingsPanelHeight }]}>
+          <View style={styles.settingsScrollbarZone}>
+            {showSettingsScrollbar ? (
+              <View style={[styles.settingsScrollbarTrack, { width: scrollbarTrackWidth }]}>
+                <View
                   style={[
-                    styles.textBoxOverlay,
+                    styles.settingsScrollbarThumb,
                     {
-                      left: x,
-                      top: y,
-                      width: boxWidth,
-                      height: boxHeight,
+                      width: scrollbarThumbSize,
+                      height: scrollbarThumbSize,
+                      borderRadius: scrollbarThumbSize / 2,
+                      transform: [{ translateX: scrollbarThumbX }],
                     },
-                    isSelected && styles.textBoxOverlaySelected,
+                  ]}
+                />
+              </View>
+            ) : null}
+          </View>
+          <View style={[styles.settingsStrip, { height: settingsStripHeight }]}>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              onLayout={(event) => setSettingsViewportWidth(event.nativeEvent.layout.width)}
+              onContentSizeChange={(contentWidth) => setSettingsContentWidth(contentWidth)}
+              onScroll={(event) => setSettingsScrollX(event.nativeEvent.contentOffset.x)}
+              scrollEventThrottle={16}
+              contentContainerStyle={styles.settingsScrollContent}
+            >
+              {featureColumns.map((column, columnIndex) => (
+                <View
+                  key={`feature-column-${columnIndex}`}
+                  style={[
+                    styles.settingsColumn,
+                    {
+                      width: settingsTileWidth,
+                    },
                   ]}
                 >
-                  {isSelected ? (
-                    <>
-                      <View style={styles.selectionDotTopLeft} />
-                      <View style={styles.selectionDotTopRight} />
-                      <View style={styles.selectionDotBottomLeft} />
-                      <View style={styles.selectionDotBottomRight} />
-                    </>
-                  ) : null}
-                </Pressable>
-              );
-            })}
-          </View>
-        </View>
-        <Canvas
-          ref={exportCanvasRef}
-          pointerEvents="none"
-          style={{
-            position: 'absolute',
-            left: -10000,
-            top: -10000,
-            width: nativeCanvasWidth,
-            height: nativeCanvasHeight,
-          }}
-        >
-          {renderCanvasContent(layoutTextBoxMetrics, nativeCanvasWidth, nativeCanvasHeight)}
-        </Canvas>
-      </View>
-        <View style={styles.settingsContainer}>
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator
-            contentContainerStyle={styles.settingsScrollContent}
-          >
-            <View style={styles.settingsGrid}>
-              {/* {Array.from({ length: 20 }, (_, index) => (
-                <View key={`setting-item-${index}`} style={styles.settingsGridItem}>
-                  <Text style={styles.settingsGridItemText}>{index + 1}</Text>
-
-                </View>
-              ))} */}
-              {FeaturesArray.map((feature, index) => (
-                <View key={`feature-item-${index}`} style={styles.settingsGridItem} onTouchEnd={() => HandleFeature(feature.name)}>
-                  {/* <Icon source={feature.icon} size={24} /> */}
-                  {/* <MaterialIcons name={feature.icon} size={24}/> */}
-                  {feature.icon}
-
-                  <Text style={styles.settingsGridItemText}>{feature.label}</Text>
+                  {column.map((feature, index) => (
+                    <View
+                      key={`feature-item-${columnIndex}-${index}`}
+                      style={[
+                        styles.settingsGridItem,
+                        {
+                          width: settingsTileWidth,
+                          height: settingsTileHeight,
+                        },
+                      ]}
+                      onTouchEnd={() => HandleFeature(feature.name)}
+                    >
+                      <View style={styles.settingsIconCircle}>{feature.icon}</View>
+                      <Text style={styles.settingsGridItemText}>{feature.label}</Text>
+                    </View>
+                  ))}
                 </View>
               ))}
-            </View>
-          </ScrollView>
+            </ScrollView>
+          </View>
+          <View style={styles.templatesZone}>
+            <Pressable
+              style={styles.templatesButton}
+              onPress={() => setTemplatesModalVisible(true)}
+            >
+              <Text style={styles.templatesButtonText}>Templates</Text>
+            </Pressable>
+          </View>
         </View>
     </View>
       <Modal
@@ -1523,6 +1627,48 @@ const imageUri = backgroundImageUri || require("../../assets/test.jpg");
           </View>
         </View>
       </Modal>
+      <Modal
+        visible={templatesModalVisible}
+        animationType="slide"
+        transparent
+        onRequestClose={() => setTemplatesModalVisible(false)}
+      >
+        <View style={styles.templatesBackdrop}>
+          <Pressable style={StyleSheet.absoluteFill} onPress={() => setTemplatesModalVisible(false)} />
+          <View style={styles.templatesSheet}>
+            <View style={styles.templatesHeader}>
+              <Text style={styles.templatesTitle}>Choose Template</Text>
+              <Pressable onPress={() => setTemplatesModalVisible(false)}>
+                <MaterialIcons name="close" size={24} color="#222" />
+              </Pressable>
+            </View>
+            <View style={styles.templateGrid}>
+              {templateOptions.map((template) => {
+                const preview = CANVAS_PRESETS[template.key];
+                return (
+                  <Pressable
+                    key={template.key}
+                    style={styles.templateCard}
+                    onPress={() => {
+                      setActiveCanvasKey(template.key);
+                      setTemplatesModalVisible(false);
+                    }}
+                  >
+                    <View
+                      style={[
+                        styles.templatePreview,
+                        { aspectRatio: preview.aspectRatio },
+                      ]}
+                    >
+                      <Text style={styles.templatePreviewLabel}>{template.label}</Text>
+                    </View>
+                  </Pressable>
+                );
+              })}
+            </View>
+          </View>
+        </View>
+      </Modal>
     </>
   )
 }
@@ -1535,10 +1681,15 @@ const styles = StyleSheet.create({
     //  backgroundColor: 'red'
 
   },
+  canvasViewport: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingBottom: 24,
+  },
   canvas: {
     marginTop: 12,
-    marginLeft: '5%',
-    marginRight: '5%',
+    alignSelf: 'center',
     position: 'relative',
     overflow: 'hidden',
   },
@@ -1680,33 +1831,152 @@ const styles = StyleSheet.create({
   // },
   settingsContainer: {
     // backgroundColor: 'green',
-    height: '20%',
     position: 'absolute',
     bottom: 0,
     left: 0,
     right: 0,
-    flex:1
+    flex: 1,
+    paddingTop: 4,
+    paddingBottom: 4,
+  },
+  settingsStrip: {
+    flexShrink: 0,
   },
   settingsGrid: {
-    height: '100%',
-    flexDirection: 'column',
-    flexWrap: 'wrap',
-    alignContent: 'flex-start',
+    minHeight: '100%',
+    flexDirection: 'row',
+    flexWrap: 'nowrap',
+    alignItems: 'flex-start',
+    justifyContent: 'center',
+    gap: 2,
   },
   settingsScrollContent: {
-    // paddingHorizontal: 4,
+    alignItems: 'center',
+    paddingHorizontal: 8,
+    paddingBottom: 6,
+  },
+  settingsColumn: {
+    height: '100%',
+    flexDirection: 'column',
+    justifyContent: 'center',
+    marginRight: 8,
   },
   settingsGridItem: {
-    width: 72,
-    height: '50%',
-   
+    paddingHorizontal: 6,
+    paddingVertical: 8,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#ffffff',
+  },
+  settingsIconCircle: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    backgroundColor: '#f4f4f4',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 6,
   },
   settingsGridItemText: {
     fontSize: 12,
     fontWeight: '600',
+    color: '#222',
+    textAlign: 'center',
+  },
+  settingsScrollbarTrack: {
+    alignSelf: 'center',
+    height: 14,
+    borderRadius: 999,
+    backgroundColor: '#ececec',
+    justifyContent: 'center',
+    paddingHorizontal: 3,
+    overflow: 'hidden',
+  },
+  settingsScrollbarThumb: {
+    backgroundColor: '#ffc107',
+    position: 'absolute',
+    left: 3,
+    top: 3,
+    shadowColor: '#000',
+    shadowOpacity: 0.12,
+    shadowRadius: 2,
+    shadowOffset: { width: 0, height: 1 },
+    elevation: 1,
+  },
+  settingsScrollbarZone: {
+    flexShrink: 0,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingTop: 4,
+    paddingBottom: 4,
+  },
+  templatesZone: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingTop: 2,
+    paddingBottom: 2,
+  },
+  templatesButton: {
+    minHeight: 40,
+    paddingHorizontal: 20,
+    borderRadius: 999,
+    backgroundColor: '#f4f4f4',
+    borderWidth: 1,
+    borderColor: '#e6e6e6',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  templatesButtonText: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#222',
+  },
+  templatesBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.45)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 16,
+  },
+  templatesSheet: {
+    width: '100%',
+    maxWidth: 560,
+    backgroundColor: '#fff',
+    borderRadius: 24,
+    padding: 20,
+    gap: 16,
+  },
+  templatesHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  templatesTitle: {
+    fontSize: 18,
+    fontWeight: '800',
+    color: '#222',
+  },
+  templateGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 12,
+  },
+  templateCard: {
+    width: '48%',
+    borderRadius: 18,
+  },
+  templatePreview: {
+    borderRadius: 18,
+    backgroundColor: '#f3f3f3',
+    borderWidth: 1,
+    borderColor: '#e8e8e8',
+    minHeight: 120,
+    padding: 14,
+    justifyContent: 'flex-end',
+  },
+  templatePreviewLabel: {
+    fontSize: 13,
+    fontWeight: '700',
     color: '#222',
   },
   modalBackdrop: {
@@ -1856,6 +2126,9 @@ const styles = StyleSheet.create({
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
     padding: 20,
+    width: '100%',
+    maxWidth: 560,
+    alignSelf: 'center',
   },
   modalTitle: {
     fontSize: 18,

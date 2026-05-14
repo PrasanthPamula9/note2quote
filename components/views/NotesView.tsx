@@ -6,9 +6,11 @@ import {
   FlatList,
   TouchableOpacity,
   SafeAreaView,
+  useWindowDimensions,
 } from 'react-native';
 import { FAB, Appbar } from 'react-native-paper';
 import { Note } from '../../types/notes';
+import { getResponsiveMetrics } from '../utils/responsive';
 
 interface NotesViewProps {
   notes?: Note[];
@@ -21,6 +23,9 @@ export default function NotesView({
   onNotePress,
   onAddNote,
 }: NotesViewProps) {
+  const { width, height } = useWindowDimensions();
+  const layout = getResponsiveMetrics(width, height);
+
   const formatDate = (timestamp: number) => {
     const d = new Date(timestamp);
     const month = String(d.getDate()).padStart(2, '0');
@@ -31,45 +36,78 @@ export default function NotesView({
 
   const renderNoteCard = ({ item }: { item: Note }) => (
     <TouchableOpacity
-      style={styles.noteCard}
+      style={[
+        styles.noteCard,
+        {
+          borderRadius: layout.cardRadius,
+          padding: layout.sectionPadding - 4,
+          marginBottom: layout.cardGap,
+        },
+      ]}
       onPress={() => onNotePress?.(item)}
       activeOpacity={0.7}
     >
       <View style={styles.noteContent}>
-        <Text style={styles.noteTitle} numberOfLines={2}>
+        <Text style={[styles.noteTitle, { fontSize: layout.bodySize }]} numberOfLines={2}>
           {item.header}
         </Text>
         {item.body ? (
-          <Text style={styles.notePreview} numberOfLines={1}>
+          <Text style={[styles.notePreview, { fontSize: layout.subtitleSize }]} numberOfLines={1}>
             {item.body}
           </Text>
         ) : null}
       </View>
-      <Text style={styles.noteDate}>{formatDate(item.updated_at)}</Text>
+      <Text style={[styles.noteDate, { fontSize: layout.smallTextSize }]}>{formatDate(item.updated_at)}</Text>
     </TouchableOpacity>
   );
 
   return (
     <SafeAreaView style={styles.container}>
       <Appbar.Header style={{ backgroundColor: 'transparent', elevation: 0 }}>
-        <Appbar.Content  color="#433e3e" titleStyle={{ fontSize:28 , fontWeight: '800'}} title="Notes" />
+        <Appbar.Content
+          color="#433e3e"
+          titleStyle={{ fontSize: layout.titleSize, fontWeight: '800', marginTop: 8 }}
+          title="Notes"
+        />
       </Appbar.Header>
 
       <FlatList
         data={defaultNotes}
         renderItem={renderNoteCard}
         keyExtractor={(item) => item.id}
-        contentContainerStyle={styles.listContent}
+        contentContainerStyle={[
+          styles.listContent,
+          {
+            maxWidth: layout.contentMaxWidth,
+            paddingHorizontal: layout.pagePadding,
+            paddingBottom: layout.sectionPadding,
+            alignSelf: 'center',
+            width: '100%',
+          },
+        ]}
         showsVerticalScrollIndicator={false}
         ListEmptyComponent={
           <View style={styles.emptyState}>
-            <Text style={styles.emptyTitle}>No notes yet</Text>
-            <Text style={styles.emptyText}>Tap the plus button to create your first note.</Text>
+            <Text style={[styles.emptyTitle, { fontSize: layout.bodySize + 2 }]}>No notes yet</Text>
+            <Text style={[styles.emptyText, { fontSize: layout.subtitleSize }]}>
+              Tap the plus button to create your first note.
+            </Text>
           </View>
         }
       />
 
-      <FAB icon="plus" style={styles.fab} onPress={onAddNote} size="medium" />
+      <FAB
+        icon="plus"
+        style={[
+          styles.fab,
+          {
+            margin: layout.sectionPadding,
+            transform: [{ scale: layout.isTablet ? 1.05 : 1 }],
+          },
+        ]}
+        onPress={onAddNote}
+        size={layout.isTablet ? 'large' : 'medium'}
+      />
     </SafeAreaView>
   );
 }
@@ -80,9 +118,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#fff',
   },
   listContent: {
-    paddingHorizontal: 12,
     paddingTop: 8,
-    paddingBottom: 20,
   },
   emptyState: {
     paddingHorizontal: 24,
@@ -103,9 +139,6 @@ const styles = StyleSheet.create({
   },
   noteCard: {
     backgroundColor: '#fff',
-    borderRadius: 8,
-    padding: 16,
-    marginBottom: 12,
     borderWidth: 1,
     borderColor: '#e0e0e0',
     flexDirection: 'row',
@@ -117,25 +150,23 @@ const styles = StyleSheet.create({
     marginRight: 12,
   },
   noteTitle: {
-    fontSize: 16,
     fontWeight: '500',
     color: '#000',
     marginBottom: 4,
+    lineHeight: 22,
   },
   notePreview: {
-    fontSize: 13,
     color: '#999',
     marginBottom: 8,
+    lineHeight: 18,
   },
   noteDate: {
-    fontSize: 12,
     color: '#ccc',
     minWidth: 70,
     textAlign: 'right',
   },
   fab: {
     position: 'absolute',
-    margin: 16,
     right: 0,
     bottom: 0,
     backgroundColor: '#ffc107',

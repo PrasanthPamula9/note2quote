@@ -1,7 +1,16 @@
 import React from 'react';
-import { FlatList, ImageBackground, Pressable, StyleSheet, Text, View } from 'react-native';
+import {
+  FlatList,
+  ImageBackground,
+  Pressable,
+  StyleSheet,
+  Text,
+  View,
+  useWindowDimensions,
+} from 'react-native';
 import MaterialIcons from '@react-native-vector-icons/material-design-icons';
 import { Quote } from '../../types/quotes';
+import { getResponsiveMetrics } from '../utils/responsive';
 
 const QUOTE_BG = require('../../assets/test.jpg');
 
@@ -24,6 +33,9 @@ export default function QuotesGalleryView({
   onAddQuote,
   onQuotePress,
 }: QuotesGalleryViewProps) {
+  const { width, height } = useWindowDimensions();
+  const layout = getResponsiveMetrics(width, height);
+
   const getPreviewTextColor = (quote: Quote) =>
     quote.editor_config.text_boxes?.[0]?.font_color ?? quote.editor_config.font_color;
 
@@ -40,33 +52,71 @@ export default function QuotesGalleryView({
   return (
     <View style={styles.container}>
       <View style={styles.header}>
-        <Text style={styles.title}>Quotes</Text>
-        <Text style={styles.subtitle}>Tap a card to edit or use the plus tile to start a new quote.</Text>
+        <Text style={[styles.title, { fontSize: layout.titleSize }]}>Quotes</Text>
+        <Text style={[styles.subtitle, { fontSize: layout.subtitleSize }]}>
+          Tap a card to edit or use the plus tile to start a new quote.
+        </Text>
       </View>
 
       <FlatList
         data={data}
-        numColumns={2}
+        numColumns={layout.listColumns}
         keyExtractor={(item) => item.id}
-        contentContainerStyle={styles.listContent}
-        columnWrapperStyle={styles.columnWrapper}
+        contentContainerStyle={[
+          styles.listContent,
+          {
+            maxWidth: layout.contentMaxWidth,
+            alignSelf: 'center',
+            width: '100%',
+            paddingHorizontal: layout.pagePadding,
+            paddingBottom: layout.sectionPadding,
+          },
+        ]}
+        columnWrapperStyle={[styles.columnWrapper, { gap: layout.cardGap }]}
         renderItem={({ item }) => {
           if (item.kind === 'add') {
             return (
-              <Pressable style={styles.addCard} onPress={onAddQuote}>
+              <Pressable
+                style={[
+                  styles.addCard,
+                  {
+                    borderRadius: layout.cardRadius,
+                    marginBottom: layout.cardGap,
+                  },
+                ]}
+                onPress={onAddQuote}
+              >
                 <View style={styles.addContent}>
-                  <View style={styles.addIconCircle}>
-                    <MaterialIcons name="plus" size={36} color="#433e3e" />
+                  <View
+                    style={[
+                      styles.addIconCircle,
+                      {
+                        width: layout.isTablet ? 84 : 72,
+                        height: layout.isTablet ? 84 : 72,
+                        borderRadius: layout.isTablet ? 42 : 36,
+                      },
+                    ]}
+                  >
+                    <MaterialIcons name="plus" size={layout.isTablet ? 40 : 36} color="#433e3e" />
                   </View>
-                  <Text style={styles.addLabel}>New Quote</Text>
+                  <Text style={[styles.addLabel, { fontSize: layout.bodySize }]}>New Quote</Text>
                 </View>
               </Pressable>
             );
           }
 
           return (
-            <Pressable style={styles.card} onPress={() => onQuotePress(item)}>
-              <View style={[styles.quoteTile, { backgroundColor: item.editor_config.bg_color }]}>
+            <Pressable
+              style={[
+                styles.card,
+                {
+                  borderRadius: layout.cardRadius,
+                  marginBottom: layout.cardGap,
+                },
+              ]}
+              onPress={() => onQuotePress(item)}
+            >
+              <View style={[styles.quoteTile, { backgroundColor: item.editor_config.bg_color, borderRadius: layout.cardRadius }]}>
                 <ImageBackground
                   source={getBackgroundSource(item)}
                   style={styles.heroImage}
@@ -75,11 +125,18 @@ export default function QuotesGalleryView({
                   <View style={[styles.heroOverlay, { backgroundColor: item.editor_config.bg_color }]} />
                 </ImageBackground>
                 <View style={styles.quoteBody}>
-                  <Text style={[styles.quoteMark, { color: getPreviewTextColor(item) }]}>{'"'}</Text>
-                  <Text style={[styles.quoteText, { color: getPreviewTextColor(item) }]} numberOfLines={4}>
+                  <Text
+                    style={[styles.quoteMark, { color: getPreviewTextColor(item), fontSize: layout.titleSize }]}
+                  >
+                    {'"'}
+                  </Text>
+                  <Text
+                    style={[styles.quoteText, { color: getPreviewTextColor(item), fontSize: layout.bodySize }]}
+                    numberOfLines={4}
+                  >
                     {item.quote_text}
                   </Text>
-                  <Text style={[styles.dateText, { color: getPreviewTextColor(item) }]}>
+                  <Text style={[styles.dateText, { color: getPreviewTextColor(item), fontSize: layout.smallTextSize }]}>
                     {formatDate(item.updated_at)}
                   </Text>
                 </View>
@@ -109,30 +166,24 @@ const styles = StyleSheet.create({
     paddingBottom: 12,
   },
   title: {
-    fontSize: 28,
     fontWeight: '800',
     color: '#433e3e',
-    marginTop:30       
+    marginTop: 30,
   },
   subtitle: {
     marginTop: 6,
-    fontSize: 14,
     lineHeight: 20,
     color: '#5f5f5f',
   },
   listContent: {
-    paddingHorizontal: 16,
-    paddingBottom: 24,
     marginTop: 8,
   },
   columnWrapper: {
-    gap: 12,
+    justifyContent: 'space-between',
   },
   card: {
     flex: 1,
     aspectRatio: 1,
-    borderRadius: 20,
-    marginBottom: 12,
     shadowColor: '#000',
     shadowOpacity: 0.08,
     shadowRadius: 10,
@@ -142,14 +193,11 @@ const styles = StyleSheet.create({
   },
   quoteTile: {
     flex: 1,
-    borderRadius: 20,
     overflow: 'hidden',
   },
   addCard: {
     flex: 1,
     aspectRatio: 1,
-    borderRadius: 20,
-    marginBottom: 12,
     borderWidth: 1.5,
     borderColor: '#fff',
     backgroundColor: '#fff',
@@ -186,9 +234,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   addIconCircle: {
-    width: 72,
-    height: 72,
-    borderRadius: 36,
     backgroundColor: '#ffc107',
     alignItems: 'center',
     justifyContent: 'center',
@@ -197,17 +242,13 @@ const styles = StyleSheet.create({
     borderColor: '#ffc107',
   },
   addLabel: {
-    fontSize: 16,
     fontWeight: '700',
     color: '#433e3e',
   },
   quoteMark: {
-    fontSize: 34,
-    lineHeight: 34,
     fontWeight: '700',
   },
   quoteText: {
-    fontSize: 16,
     lineHeight: 22,
     fontWeight: '600',
     flex: 1,
@@ -215,7 +256,6 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   dateText: {
-    fontSize: 12,
     opacity: 0.7,
   },
   emptyState: {
