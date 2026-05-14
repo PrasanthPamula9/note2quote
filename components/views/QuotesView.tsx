@@ -8,6 +8,8 @@ import Slider from '@react-native-community/slider';
 import MaterialIcons from '@react-native-vector-icons/material-design-icons';
 import ColorPickerComponent, { HueSlider, Panel1 } from 'reanimated-color-picker';
 import { QuoteEditorConfig, CanvasPresetKey, QuoteTextBox } from '../../types/quotes';
+const INLINE_EDITOR_YELLOW = '#ffc107';
+const INLINE_EDITOR_DARK = '#433e3e';
 // ─── Canvas size presets ─────────────────────────────────────────────────────
 type CanvasPreset = {
   label: string;
@@ -144,6 +146,446 @@ const normalizeTextBoxes = (boxes?: QuoteTextBox[] | null, fallbackText = DEFAUL
   return normalized;
 };
 
+type InlineFeatureKey =
+  | 'BackgroundImage'
+  | 'BackgroundColor'
+  | 'FontColor'
+  | 'ImageOpacity'
+  | 'FontSize'
+  | 'FontFamily'
+  | 'CanvasSize'
+  | 'FontShadow'
+  | 'FontWeight'
+  | 'BoxWidth'
+  | 'TextPosition';
+
+type InlineFeaturePanelProps = {
+  feature: InlineFeatureKey;
+  activeCanvasKey: CanvasPresetKey;
+  availableFonts: string[];
+  backgroundImageUri: string | null;
+  bgColor: string;
+  fontColor: string;
+  fontFamily: string;
+  fontShadow: number;
+  fontSize: number;
+  fontWeight: FontWeight;
+  boxWidth: number;
+  imageOpacity: number;
+  inlinePickerHeight: number;
+  nativeCanvasHeight: number;
+  nativeCanvasWidth: number;
+  globalPositionX: number;
+  globalPositionXMax: number;
+  globalPositionY: number;
+  globalPositionYMax: number;
+  resolvedTextColor: string;
+  resolvedTextFamily: string;
+  resolvedTextShadow: number;
+  resolvedTextSize: number;
+  resolvedTextWeight: FontWeight;
+  onBackgroundImageChange: (uri: string | null) => void;
+  onBgColorChange: (color: string) => void;
+  onCanvasKeyChange: (key: CanvasPresetKey) => void;
+  onClose: () => void;
+  onFontColorChange: (color: string) => void;
+  onFontFamilyChange: (family: string) => void;
+  onFontShadowChange: (value: number) => void;
+  onFontSizeChange: (value: number) => void;
+  onFontWeightChange: (value: FontWeight) => void;
+  onBoxWidthChange: (value: number) => void;
+  onImageOpacityChange: (value: number) => void;
+  onTextPositionXChange: (value: number) => void;
+  onTextPositionYChange: (value: number) => void;
+};
+
+const InlineFeatureShell = React.memo(function InlineFeatureShell({
+  children,
+  onClose,
+}: {
+  children: React.ReactNode;
+  onClose: () => void;
+}) {
+  return (
+    <View style={styles.featurePanel}>
+      <View style={styles.featurePanelHeader}>
+        <View style={styles.featurePanelActions}>
+          <Pressable onPress={onClose} hitSlop={10} style={styles.inlineFeatureDoneButton}>
+            <MaterialIcons name="check" size={22} color={INLINE_EDITOR_DARK} />
+          </Pressable>
+        </View>
+      </View>
+      <View style={styles.featurePanelBody}>{children}</View>
+    </View>
+  );
+});
+
+const InlineFeaturePanel = React.memo(function InlineFeaturePanel({
+  feature,
+  activeCanvasKey,
+  availableFonts,
+  backgroundImageUri,
+  bgColor,
+  fontColor,
+  fontFamily,
+  fontShadow,
+  fontSize,
+  fontWeight,
+  boxWidth,
+  imageOpacity,
+  inlinePickerHeight,
+  nativeCanvasHeight,
+  nativeCanvasWidth,
+  globalPositionX,
+  globalPositionXMax,
+  globalPositionY,
+  globalPositionYMax,
+  resolvedTextColor,
+  resolvedTextFamily,
+  resolvedTextShadow,
+  resolvedTextSize,
+  resolvedTextWeight,
+  onBackgroundImageChange,
+  onBgColorChange,
+  onCanvasKeyChange,
+  onClose,
+  onFontColorChange,
+  onFontFamilyChange,
+  onFontShadowChange,
+  onFontSizeChange,
+  onFontWeightChange,
+  onBoxWidthChange,
+  onImageOpacityChange,
+  onTextPositionXChange,
+  onTextPositionYChange,
+}: InlineFeaturePanelProps) {
+  const [draftColor, setDraftColor] = useState(feature === 'FontColor' ? fontColor : bgColor);
+  const [draftOpacity, setDraftOpacity] = useState(imageOpacity);
+  const [draftFontSize, setDraftFontSize] = useState(fontSize);
+  const [draftFontShadow, setDraftFontShadow] = useState(fontShadow);
+  const [draftBoxWidth, setDraftBoxWidth] = useState(boxWidth);
+  const [draftX, setDraftX] = useState(globalPositionX);
+  const [draftY, setDraftY] = useState(globalPositionY);
+
+  useEffect(() => {
+    setDraftColor(feature === 'FontColor' ? fontColor : bgColor);
+    setDraftOpacity(imageOpacity);
+    setDraftFontSize(fontSize);
+    setDraftFontShadow(fontShadow);
+    setDraftBoxWidth(boxWidth);
+    setDraftX(globalPositionX);
+    setDraftY(globalPositionY);
+  }, [feature]);
+
+  const commitAndClose = () => {
+    onClose();
+  };
+
+  switch (feature) {
+    case 'BackgroundImage':
+      return (
+        <InlineFeatureShell onClose={commitAndClose}>
+          <View style={styles.featureOptionsRow}>
+            <Pressable
+              style={styles.featureOptionCard}
+              onPress={() => {
+                launchCamera({ mediaType: 'photo' }, (response) => {
+                  if (response.assets && response.assets[0] && response.assets[0].uri) {
+                    onBackgroundImageChange(response.assets[0].uri);
+                    onClose();
+                  }
+                });
+              }}
+            >
+              <Icon source="camera" size={24} color="#222" />
+              <Text style={styles.featureOptionText}>Camera</Text>
+            </Pressable>
+            <Pressable
+              style={styles.featureOptionCard}
+              onPress={() => {
+                launchImageLibrary({ mediaType: 'photo' }, (response) => {
+                  if (response.assets && response.assets[0] && response.assets[0].uri) {
+                    onBackgroundImageChange(response.assets[0].uri);
+                    onClose();
+                  }
+                });
+              }}
+            >
+              <Icon source="folder-image" size={24} color="#222" />
+              <Text style={styles.featureOptionText}>Device</Text>
+            </Pressable>
+            <Pressable
+              style={styles.featureOptionCard}
+              onPress={() => {
+                Alert.alert('Coming Soon', 'Unsplash integration is coming soon!');
+                onClose();
+              }}
+            >
+              <Icon source="image-search" size={24} color="#222" />
+              <Text style={styles.featureOptionText}>Unsplash</Text>
+              </Pressable>
+            </View>
+        </InlineFeatureShell>
+      );
+    case 'BackgroundColor':
+    case 'FontColor':
+      return (
+        <InlineFeatureShell onClose={commitAndClose}>
+          <View style={styles.colorPickerWrap}>
+            <ColorPickerComponent
+              value={draftColor}
+              sliderThickness={14}
+              thumbSize={14}
+              thumbShape="circle"
+              thumbColor={INLINE_EDITOR_YELLOW}
+              boundedThumb
+              onChangeJS={(color) => {
+                setDraftColor(color.hex);
+                if (feature === 'FontColor') {
+                  onFontColorChange(color.hex);
+                } else {
+                  onBgColorChange(color.hex);
+                }
+              }}
+              onCompleteJS={(color) => {
+                setDraftColor(color.hex);
+                }}
+              >
+              <Panel1
+                style={[styles.colorPickerSurface, { height: inlinePickerHeight, borderRadius: 14 }]}
+                boundedThumb
+                thumbShape="circle"
+                thumbSize={14}
+                thumbColor={INLINE_EDITOR_YELLOW}
+              />
+              <HueSlider
+                style={styles.colorPickerHueSlider}
+                sliderThickness={14}
+                thumbShape="circle"
+                thumbSize={14}
+                thumbColor={INLINE_EDITOR_YELLOW}
+                boundedThumb
+              />
+            </ColorPickerComponent>
+          </View>
+        </InlineFeatureShell>
+      );
+    case 'ImageOpacity':
+      return (
+        <InlineFeatureShell onClose={commitAndClose}>
+          <View style={styles.sliderSection}>
+            <Text style={styles.sliderLabelText}>Opacity</Text>
+            <Slider
+              style={styles.sliderLarge}
+              minimumValue={0}
+              maximumValue={1}
+              value={draftOpacity}
+              minimumTrackTintColor={INLINE_EDITOR_YELLOW}
+              maximumTrackTintColor={INLINE_EDITOR_DARK}
+              thumbTintColor={INLINE_EDITOR_YELLOW}
+              onValueChange={(value) => {
+                setDraftOpacity(value);
+                onImageOpacityChange(value);
+              }}
+              onSlidingComplete={() => {}}
+            />
+            <Text style={styles.sliderPercentText}>{Math.round(draftOpacity * 100)}%</Text>
+          </View>
+        </InlineFeatureShell>
+      );
+    case 'FontSize':
+      return (
+        <InlineFeatureShell onClose={commitAndClose}>
+          <View style={styles.sliderSection}>
+            <Text style={styles.sliderLabelText}>Font Size</Text>
+            <Slider
+              style={styles.sliderLarge}
+              minimumValue={8}
+              maximumValue={Math.max(48, Math.round(nativeCanvasHeight * 0.14))}
+              value={draftFontSize}
+              minimumTrackTintColor={INLINE_EDITOR_YELLOW}
+              maximumTrackTintColor={INLINE_EDITOR_DARK}
+              thumbTintColor={INLINE_EDITOR_YELLOW}
+              onValueChange={(value) => {
+                setDraftFontSize(value);
+                onFontSizeChange(value);
+              }}
+              onSlidingComplete={() => {}}
+            />
+            <Text style={styles.sliderPercentText}>{Math.round(draftFontSize)}px</Text>
+          </View>
+        </InlineFeatureShell>
+      );
+    case 'FontFamily':
+      return (
+        <InlineFeatureShell onClose={commitAndClose}>
+          <ScrollView horizontal nestedScrollEnabled showsHorizontalScrollIndicator={false} contentContainerStyle={styles.fontStrip}>
+            {availableFonts.map((item) => (
+              <Pressable
+                key={item}
+                onPress={() => {
+                  onFontFamilyChange(item);
+                  onClose();
+                }}
+                style={[styles.fontChip, resolvedTextFamily === item && styles.fontChipActive]}
+              >
+                <Text style={[styles.fontChipText, resolvedTextFamily === item && styles.fontChipTextActive]} numberOfLines={1}>
+                  {item}
+                </Text>
+                </Pressable>
+            ))}
+          </ScrollView>
+        </InlineFeatureShell>
+      );
+    case 'CanvasSize':
+      return (
+        <InlineFeatureShell onClose={commitAndClose}>
+          <View style={styles.sizeOptionsContainer}>
+            <Pressable
+              onPress={() => {
+                onCanvasKeyChange('instagram_post_square');
+                onClose();
+              }}
+              style={[styles.sizeOption, activeCanvasKey === 'instagram_post_square' && styles.sizeOptionActive]}
+            >
+              <View style={[styles.squarePreview, activeCanvasKey === 'instagram_post_square' && styles.squarePreviewActive]} />
+              <Text style={styles.sizeLabel}>Square</Text>
+            </Pressable>
+            <Pressable
+              onPress={() => {
+                onCanvasKeyChange('instagram_story');
+                onClose();
+              }}
+              style={[styles.sizeOption, activeCanvasKey === 'instagram_story' && styles.sizeOptionActive]}
+            >
+              <View style={[styles.storyPreview, activeCanvasKey === 'instagram_story' && styles.storyPreviewActive]} />
+              <Text style={styles.sizeLabel}>Story</Text>
+            </Pressable>
+          </View>
+        </InlineFeatureShell>
+      );
+    case 'FontShadow':
+      return (
+        <InlineFeatureShell onClose={commitAndClose}>
+          <View style={styles.sliderSection}>
+            <Text style={styles.sliderLabelText}>Shadow</Text>
+            <Slider
+              style={styles.sliderLarge}
+              minimumValue={0}
+              maximumValue={10}
+              value={draftFontShadow}
+              minimumTrackTintColor={INLINE_EDITOR_YELLOW}
+              maximumTrackTintColor={INLINE_EDITOR_DARK}
+              thumbTintColor={INLINE_EDITOR_YELLOW}
+              onValueChange={(value) => {
+                setDraftFontShadow(value);
+                onFontShadowChange(value);
+              }}
+              onSlidingComplete={() => {}}
+            />
+            <Text style={styles.sliderPercentText}>{Math.round(draftFontShadow)}</Text>
+          </View>
+        </InlineFeatureShell>
+      );
+    case 'FontWeight':
+      return (
+        <InlineFeatureShell onClose={commitAndClose}>
+          <ScrollView horizontal nestedScrollEnabled showsHorizontalScrollIndicator={false} contentContainerStyle={styles.weightStrip}>
+            {[
+              { label: 'Light', value: FontWeight.Thin },
+              { label: 'Normal', value: FontWeight.Normal },
+              { label: 'Medium', value: FontWeight.Bold },
+              { label: 'SemiBold', value: FontWeight.Bold },
+              { label: 'Bold', value: FontWeight.Bold },
+              { label: 'ExtraBold', value: FontWeight.Bold },
+            ].map((item, index) => (
+              <Pressable
+                key={index}
+                onPress={() => {
+                  onFontWeightChange(item.value);
+                  onClose();
+                }}
+                style={[styles.weightChip, resolvedTextWeight === item.value && styles.weightChipActive]}
+              >
+                <Text style={[styles.weightOptionText, resolvedTextWeight === item.value && styles.weightOptionTextActive]}>
+                  {item.label}
+                </Text>
+              </Pressable>
+            ))}
+          </ScrollView>
+        </InlineFeatureShell>
+      );
+    case 'BoxWidth':
+      return (
+        <InlineFeatureShell onClose={commitAndClose}>
+          <View style={styles.sliderSection}>
+            <Text style={styles.sliderLabelText}>Box Width</Text>
+            <Slider
+              style={styles.sliderLarge}
+              minimumValue={0.15}
+              maximumValue={0.85}
+              value={draftBoxWidth}
+              minimumTrackTintColor={INLINE_EDITOR_YELLOW}
+              maximumTrackTintColor={INLINE_EDITOR_DARK}
+              thumbTintColor={INLINE_EDITOR_YELLOW}
+              onValueChange={(value) => {
+                setDraftBoxWidth(value);
+                onBoxWidthChange(value);
+              }}
+              onSlidingComplete={() => {}}
+            />
+            <Text style={styles.sliderPercentText}>{Math.round(draftBoxWidth * 100)}%</Text>
+          </View>
+        </InlineFeatureShell>
+      );
+    case 'TextPosition':
+      return (
+        <InlineFeatureShell onClose={commitAndClose}>
+          <View style={styles.positionRow}>
+            <View style={styles.positionColumn}>
+              <Text style={styles.sliderLabelText}>X</Text>
+              <Slider
+                style={styles.sliderCompact}
+                minimumValue={0}
+                maximumValue={globalPositionXMax}
+                value={draftX}
+                minimumTrackTintColor={INLINE_EDITOR_YELLOW}
+                maximumTrackTintColor={INLINE_EDITOR_DARK}
+                thumbTintColor={INLINE_EDITOR_YELLOW}
+                onValueChange={(value) => {
+                  setDraftX(value);
+                  onTextPositionXChange(value);
+                }}
+                onSlidingComplete={() => {}}
+              />
+              <Text style={styles.sliderPercentText}>{Math.round(draftX)}px</Text>
+            </View>
+            <View style={styles.positionColumn}>
+              <Text style={styles.sliderLabelText}>Y</Text>
+              <Slider
+                style={styles.sliderCompact}
+                minimumValue={0}
+                maximumValue={globalPositionYMax}
+                value={draftY}
+                minimumTrackTintColor={INLINE_EDITOR_YELLOW}
+                maximumTrackTintColor={INLINE_EDITOR_DARK}
+                thumbTintColor={INLINE_EDITOR_YELLOW}
+                onValueChange={(value) => {
+                  setDraftY(value);
+                  onTextPositionYChange(value);
+                }}
+                onSlidingComplete={() => {}}
+              />
+              <Text style={styles.sliderPercentText}>{Math.round(draftY)}px</Text>
+            </View>
+          </View>
+        </InlineFeatureShell>
+      );
+    default:
+      return null;
+  }
+});
+
 type QuotesViewProps = {
   title?: string;
   initialQuoteText?: string;
@@ -258,7 +700,7 @@ export default function QuotesView({
   }, []);
 
   useEffect(() => {
-    if (!modalVisible || currentFeature !== 'TextEdit') {
+    if (currentFeature !== 'TextEdit') {
       return;
     }
 
@@ -267,7 +709,13 @@ export default function QuotesView({
     }, 50);
 
     return () => clearTimeout(handle);
-  }, [currentFeature, modalVisible, selectedTextBoxId]);
+  }, [currentFeature, selectedTextBoxId]);
+
+  useEffect(() => {
+    if (!modalVisible) {
+      setCurrentFeature(null);
+    }
+  }, [modalVisible]);
 
     const activePreset = CANVAS_PRESETS[activeCanvasKey];
 
@@ -298,6 +746,7 @@ export default function QuotesView({
   const settingsStripHeight = settingsTileHeight * 2 + 16;
   const scrollbarTrackWidth = Math.max(40, Math.floor((settingsTileWidth / 2) * 0.7));
   const scrollbarThumbSize = 8;
+  const inlinePickerHeight = Math.max(118, Math.min(146, Math.round(settingsPanelHeight * 0.6)));
   const maxSettingsScroll = Math.max(0, settingsContentWidth - settingsViewportWidth);
   const scrollbarUsableWidth = Math.max(0, scrollbarTrackWidth - 6 - scrollbarThumbSize);
   const scrollbarThumbX =
@@ -348,9 +797,9 @@ export default function QuotesView({
     label:"Shadow"
   },
   {
-    name:"FontWeight",
-    icon:<MaterialIcons name="format-line-weight" size={24}/>,
-    label:"Weight"
+    name:"BoxWidth",
+    icon:<MaterialIcons name="arrow-expand-horizontal" size={24}/>,
+    label:"Box Width"
   },
   {
     name:"AddText",
@@ -398,6 +847,7 @@ const imageUri = backgroundImageUri || require("../../assets/test.jpg");
   const resolvedTextShadow = selectedTextBox?.font_shadow ?? fontShadow;
   const resolvedTextWeight = selectedTextBox?.font_weight ?? fontWeight;
   const resolvedTextAlign = selectedTextBox?.text_align ?? textAlign;
+  const resolvedBoxWidth = selectedTextBox?.width_percent ?? textBoxes[0]?.width_percent ?? DEFAULT_TEXT_BOX_WIDTH;
 
   const updateTextBox = (boxId: string, updates: Partial<QuoteTextBox>) => {
     setTextBoxes((current) => current.map((box) => (box.id === boxId ? { ...box, ...updates } : box)));
@@ -443,6 +893,14 @@ const imageUri = backgroundImageUri || require("../../assets/test.jpg");
   const setTextShadow = (value: number) => applyStyleChange({ font_shadow: value }, setFontShadow, value);
   const setTextWeight = (value: FontWeight) => applyStyleChange({ font_weight: value }, setFontWeight, value);
   const setTextAlignment = (value: TextAlign) => applyStyleChange({ text_align: value }, setTextAlign, value);
+  const setBoxWidth = (value: number) => {
+    if (selectedTextBox) {
+      updateTextBox(selectedTextBox.id, { width_percent: value });
+      return;
+    }
+
+    updateAllTextBoxes({ width_percent: value });
+  };
 
   const setTextX = (value: number) => {
     if (selectedTextBox) {
@@ -918,7 +1376,7 @@ const imageUri = backgroundImageUri || require("../../assets/test.jpg");
           return;
         }
         setCurrentFeature(featureName);
-        setModalVisible(true);
+        setModalVisible(featureName === 'TextEdit');
     
     // switch(featureName){
     //   case "BackgroundImage":
@@ -934,398 +1392,170 @@ const imageUri = backgroundImageUri || require("../../assets/test.jpg");
   };
 
   const HandleOpactyChange = (value:number) => {
-    console.log("Opacity value changed:", value);
     setImageOpacity(value);
   }
 
-  const renderModalContent = () => {
-    switch(currentFeature) {
-      case "BackgroundImage":
-        return (
-          <Pressable style={styles.modalBackdrop} onPress={() => setModalVisible(false)}>
-            <View style={[styles.modalContent, { height: screenHeight * 0.3 }]}>
-              <Text style={styles.modalTitle}>Select Background Image Source</Text>
-              <View style={styles.modalOptions}>
-                <Pressable style={styles.modalOption} onPress={() => {
-                  launchCamera({ mediaType: 'photo' }, (response) => {
-                    if (response.assets && response.assets[0] && response.assets[0].uri) {
-                      setBackgroundImageUri(response.assets[0].uri);
-                      setModalVisible(false);
-                    }
-                  });
-                }}>
-                  <Icon source="camera" size={24} />
-                  <Text style={styles.modalOptionText}>Camera</Text>
-                </Pressable>
-                <Pressable style={styles.modalOption} onPress={() => {
-                  launchImageLibrary({ mediaType: 'photo' }, (response) => {
-                    if (response.assets && response.assets[0] && response.assets[0].uri) {
-                      setBackgroundImageUri(response.assets[0].uri);
-                      setModalVisible(false);
-                    }
-                  });
-                }}>
-                  <Icon source="folder-image" size={24} />
-                  <Text style={styles.modalOptionText}>Device</Text>
-                </Pressable>
-                <Pressable style={styles.modalOption} onPress={() => {
-                  Alert.alert('Coming Soon', 'Unsplash integration is coming soon!');
-                  setModalVisible(false);
-                }}>
-                  <Icon source="image-search" size={24} />
-                  <Text style={styles.modalOptionText}>Unsplash</Text>
-                </Pressable>
-              </View>
-            </View>
-          </Pressable>
-        );
-      case 'BackgroundColor':
-      case 'FontColor':
-        return (
-          <View style={styles.modalBackdrop}>
-            <Pressable style={StyleSheet.absoluteFill} onPress={() => setModalVisible(false)} />
-            <View style={[styles.modalContent, { height: screenHeight * 0.4 }]}>
-              <Text style={styles.modalTitle}>
-                {currentFeature === 'FontColor' ? 'Font Color' : 'Background Color'}
-              </Text>
-              <ColorPickerComponent
-                value={currentFeature === 'FontColor' ? resolvedTextColor : bgColor}
-                sliderThickness={25}
-                thumbSize={24}
-                thumbShape='circle'
-                boundedThumb
-                onChangeJS={(color) => {
-                  if (currentFeature === 'FontColor') {
-                    setTextColor(color.hex);
-                  } else {
-                    setBgColor(color.hex);
-                  }
-                }}
-              >
-                <Panel1 style={{ borderRadius: 16 }} boundedThumb thumbShape='circle' thumbSize={24} />
-                <HueSlider style={{ marginTop: 16, borderRadius: 16 }} />
-              </ColorPickerComponent>
-            </View>
+  const closeFeaturePanel = () => {
+    setModalVisible(false);
+    setCurrentFeature(null);
+  };
+
+  const renderInlineFeatureContent = () => {
+    if (!currentFeature || currentFeature === 'TextEdit') {
+      return null;
+    }
+
+    return (
+      <InlineFeaturePanel
+        key={currentFeature}
+        feature={currentFeature as InlineFeatureKey}
+        activeCanvasKey={activeCanvasKey}
+        availableFonts={availableFonts}
+        backgroundImageUri={backgroundImageUri}
+        bgColor={bgColor}
+        fontColor={fontColor}
+        fontFamily={fontFamily}
+        fontShadow={fontShadow}
+        fontSize={fontSize}
+        fontWeight={fontWeight}
+        boxWidth={resolvedBoxWidth}
+        imageOpacity={imageOpacity}
+        inlinePickerHeight={inlinePickerHeight}
+        nativeCanvasHeight={nativeCanvasHeight}
+        nativeCanvasWidth={nativeCanvasWidth}
+        globalPositionX={globalPositionX}
+        globalPositionXMax={globalPositionXMax}
+        globalPositionY={globalPositionY}
+        globalPositionYMax={globalPositionYMax}
+        resolvedTextColor={resolvedTextColor}
+        resolvedTextFamily={resolvedTextFamily}
+        resolvedTextShadow={resolvedTextShadow}
+        resolvedTextSize={resolvedTextSize}
+        resolvedTextWeight={resolvedTextWeight}
+        onBackgroundImageChange={setBackgroundImageUri}
+        onBgColorChange={setBgColor}
+        onCanvasKeyChange={setActiveCanvasKey}
+        onClose={closeFeaturePanel}
+        onFontColorChange={setTextColor}
+        onFontFamilyChange={setTextFamily}
+        onFontShadowChange={setTextShadow}
+        onFontSizeChange={setTextSize}
+        onFontWeightChange={setTextWeight}
+        onBoxWidthChange={setBoxWidth}
+        onImageOpacityChange={HandleOpactyChange}
+        onTextPositionXChange={(value) => setTextX(value / nativeCanvasWidth)}
+        onTextPositionYChange={(value) => setTextY(value / nativeCanvasHeight)}
+      />
+    );
+  };
+
+  const renderTextEditorModalContent = () => (
+    <View style={styles.modalBackdrop}>
+      <Pressable style={StyleSheet.absoluteFill} onPress={closeFeaturePanel} />
+      <View style={[styles.modalContent, styles.textEditorModalContent]}>
+        <View style={styles.featurePanelHeader}>
+          <View style={styles.featurePanelTitleWrap}>
+            <Text style={styles.featurePanelTitle}>Edit Text Boxes</Text>
           </View>
-        )
-      case 'ImageOpacity':
-        return (
-          
-          <Pressable style={styles.modalBackdrop} onPress={() => setModalVisible(false)}>
-            <View style={[styles.modalContent, { height: screenHeight * 0.3 }]}>
-              <Slider
-                style={{width: 200, height: 40}}
-                minimumValue={0}
-                maximumValue={1}
-                value={imageOpacity}
-                minimumTrackTintColor="#FFFFFF"
-                maximumTrackTintColor="#000000"
-                onValueChange={(value) => HandleOpactyChange(value)}
-                />
-            </View>
+          <Pressable onPress={closeFeaturePanel} hitSlop={10} style={styles.featureDoneButton}>
+            <MaterialIcons name="check" size={22} color="#1a73e8" />
           </Pressable>
-        );
-      case 'FontSize':
-        return (
-          <Pressable style={styles.modalBackdrop} onPress={() => setModalVisible(false)}>
-            <View style={[styles.modalContent, { height: screenHeight * 0.3 }]}>
-                  <Text style={styles.sliderLabelText}>Font Size</Text>
-                  <Slider
-                style={{width: 200, height: 40}}
-                minimumValue={8}
-                maximumValue={Math.max(48, Math.round(nativeCanvasHeight * 0.14))}
-                value={resolvedTextSize}
-                minimumTrackTintColor="#FFFFFF"
-                maximumTrackTintColor="#000000"
-                onValueChange={(value) => setTextSize(value)}
-                />
-                <Text style={styles.sliderPercentText}>{Math.round(resolvedTextSize)}px</Text>
-                </View>
-          </Pressable>
-        );
-      case 'FontFamily':
-        return (
-          <Pressable style={styles.modalBackdrop} onPress={() => setModalVisible(false)}>
-            <View style={[styles.modalContent, { height: screenHeight * 0.6 }]} onStartShouldSetResponder={() => true}>
-              <Text style={styles.modalTitle}>Select Font</Text>
-              <FlatList
-                data={availableFonts}
-                keyExtractor={(item, index) => `${item}-${index}`}
-                renderItem={({ item }) => (
-                  <Pressable
-                    onPress={() => {
-                      setTextFamily(item);
-                      setModalVisible(false);
-                    }}
-                    style={[styles.fontOption, resolvedTextFamily === item && styles.fontOptionActive]}
-                  >
-                    <Text style={[styles.fontOptionText, resolvedTextFamily === item && styles.fontOptionTextActive]} numberOfLines={1}>
-                      {item}
-                    </Text>
-                    {resolvedTextFamily === item && <Icon source="check" size={20} color="#1a73e8" />}
-                  </Pressable>
-                )}
-                scrollEnabled={true}
-                nestedScrollEnabled={true}
-              />
-            </View>
-          </Pressable>
-        );
-      case 'CanvasSize':
-        return (
-          <Pressable style={styles.modalBackdrop} onPress={() => setModalVisible(false)}>
-            <View style={[styles.modalContent, { height: screenHeight * 0.4 }]}>
-              <Text style={styles.modalTitle}>Quote Size</Text>
-              <View style={styles.sizeOptionsContainer}>
-                {/* Square Size */}
-                <Pressable
-                  onPress={() => {
-                    setActiveCanvasKey('instagram_post_square');
-                    setModalVisible(false);
-                  }}
-                  style={[styles.sizeOption, activeCanvasKey === 'instagram_post_square' && styles.sizeOptionActive]}
-                >
-                  <View style={[styles.squarePreview, activeCanvasKey === 'instagram_post_square' && styles.squarePreviewActive]} />
-                  <Text style={styles.sizeLabel}>Square</Text>
-                </Pressable>
+        </View>
 
-                {/* Story Size */}
-                <Pressable
-                  onPress={() => {
-                    setActiveCanvasKey('instagram_story');
-                    setModalVisible(false);
-                  }}
-                  style={[styles.sizeOption, activeCanvasKey === 'instagram_story' && styles.sizeOptionActive]}
-                >
-                  <View style={[styles.storyPreview, activeCanvasKey === 'instagram_story' && styles.storyPreviewActive]} />
-                  <Text style={styles.sizeLabel}>Story</Text>
-                </Pressable>
-              </View>
-            </View>
-          </Pressable>
-        );
-      case 'FontShadow':
-        return (
-          <Pressable style={styles.modalBackdrop} onPress={() => setModalVisible(false)}>
-            <View style={[styles.modalContent, { height: screenHeight * 0.3 }]}>
-              <Text style={styles.modalTitle}>Shadow</Text>
-              <View style={styles.sliderSection}>
-                <Slider
-                  style={styles.sliderLarge}
-                  minimumValue={0}
-                  maximumValue={10}
-                  value={resolvedTextShadow}
-                  minimumTrackTintColor="#1a73e8"
-                  maximumTrackTintColor="#ddd"
-                  onValueChange={(value) => setTextShadow(value)}
-                />
-                <Text style={styles.sliderPercentText}>{Math.round(resolvedTextShadow)}</Text>
-              </View>
-            </View>
-          </Pressable>
-        );
-      case 'FontWeight':
-        const fontWeights = [
-          { label: 'Light', value: FontWeight.Thin },
-          { label: 'Normal', value: FontWeight.Normal },
-          { label: 'Medium', value: FontWeight.Bold },
-          { label: 'SemiBold', value: FontWeight.Bold },
-          { label: 'Bold', value: FontWeight.Bold },
-          { label: 'ExtraBold', value: FontWeight.Bold },
-        ];
-        return (
-          <Pressable style={styles.modalBackdrop} onPress={() => setModalVisible(false)}>
-            <View style={[styles.modalContent, { height: screenHeight * 0.5 }]}>
-              <Text style={styles.modalTitle}>Font Weight</Text>
-              <View style={styles.weightOptionsContainer}>
-                {fontWeights.map((item, index) => (
-                  <Pressable
-                    key={index}
-                    onPress={() => {
-                      setTextWeight(item.value);
-                      setModalVisible(false);
-                    }}
-                    style={[styles.weightOption, resolvedTextWeight === item.value && styles.weightOptionActive]}
-                  >
-                    <Text style={[styles.weightOptionText, resolvedTextWeight === item.value && styles.weightOptionTextActive]}>
-                      {item.label}
-                    </Text>
-                  </Pressable>
-                ))}
-              </View>
-            </View>
-          </Pressable>
-        );
-      case 'TextEdit':
-        return (
-          <Pressable style={styles.modalBackdrop} onPress={() => setModalVisible(false)}>
-            <ScrollView
-              style={[styles.modalContent, { maxHeight: screenHeight * 0.82 }]}
-              contentContainerStyle={styles.textEditorScrollContent}
-              onStartShouldSetResponder={() => true}
+        <ScrollView
+          contentContainerStyle={styles.textEditorScrollContent}
+          showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
+        >
+          <Text style={styles.textInputLabel}>Choose a box</Text>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.boxPickerRow}>
+            <Pressable
+              onPress={() => setSelectedTextBoxId('')}
+              style={[styles.boxPickerChip, !selectedTextBoxId && styles.boxPickerChipActive]}
             >
-              <Text style={styles.modalTitle}>Edit Text Boxes</Text>
-
-              <Text style={styles.textInputLabel}>Choose a box</Text>
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.boxPickerRow}>
+              <Text style={[styles.boxPickerChipText, !selectedTextBoxId && styles.boxPickerChipTextActive]}>
+                All Texts
+              </Text>
+            </Pressable>
+            {textBoxes.map((box, index) => {
+              const isActive = selectedTextBoxId === box.id;
+              return (
                 <Pressable
-                  onPress={() => setSelectedTextBoxId('')}
-                  style={[styles.boxPickerChip, !selectedTextBoxId && styles.boxPickerChipActive]}
+                  key={box.id}
+                  onPress={() => setSelectedTextBoxId(box.id)}
+                  style={[styles.boxPickerChip, isActive && styles.boxPickerChipActive]}
                 >
-                  <Text style={[styles.boxPickerChipText, !selectedTextBoxId && styles.boxPickerChipTextActive]}>
-                    All Texts
+                  <Text style={[styles.boxPickerChipText, isActive && styles.boxPickerChipTextActive]}>
+                    Text {index + 1}
                   </Text>
                 </Pressable>
-                {textBoxes.map((box, index) => {
-                  const isActive = selectedTextBoxId === box.id;
-                  return (
-                    <Pressable
-                      key={box.id}
-                      onPress={() => setSelectedTextBoxId(box.id)}
-                      style={[styles.boxPickerChip, isActive && styles.boxPickerChipActive]}
-                    >
-                      <Text style={[styles.boxPickerChipText, isActive && styles.boxPickerChipTextActive]}>
-                        Text {index + 1}
-                      </Text>
-                    </Pressable>
-                  );
-                })}
-                {textBoxes.length < MAX_TEXT_BOXES ? (
-                  <Pressable onPress={addTextBox} style={[styles.boxPickerChip, styles.boxPickerAddChip]}>
-                    <Icon source="plus" size={18} color="#1a73e8" />
-                    <Text style={styles.boxPickerAddText}>Add</Text>
-                  </Pressable>
-                ) : null}
-              </ScrollView>
-
-              <View style={styles.alignmentContainer}>
-                <Pressable
-                  onPress={() => setTextAlignment(TextAlign.Left)}
-                  style={[styles.alignButton, resolvedTextAlign === TextAlign.Left && styles.alignButtonActive]}
-                >
-                  <Icon source="format-align-left" size={24} color={resolvedTextAlign === TextAlign.Left ? '#1a73e8' : '#666'} />
-                </Pressable>
-                <Pressable
-                  onPress={() => setTextAlignment(TextAlign.Center)}
-                  style={[styles.alignButton, resolvedTextAlign === TextAlign.Center && styles.alignButtonActive]}
-                >
-                  <Icon source="format-align-center" size={24} color={resolvedTextAlign === TextAlign.Center ? '#1a73e8' : '#666'} />
-                </Pressable>
-                <Pressable
-                  onPress={() => setTextAlignment(TextAlign.Right)}
-                  style={[styles.alignButton, resolvedTextAlign === TextAlign.Right && styles.alignButtonActive]}
-                >
-                  <Icon source="format-align-right" size={24} color={resolvedTextAlign === TextAlign.Right ? '#1a73e8' : '#666'} />
-                </Pressable>
-              </View>
-
-              <Text style={styles.textInputLabel}>
-                {selectedTextBox ? 'Text content for selected box' : 'Text content for all boxes'}
-              </Text>
-              <TextInput
-                ref={selectedTextInputRef}
-                style={styles.quoteTextInput}
-                placeholder="Enter your text here..."
-                placeholderTextColor="#999"
-                multiline={true}
-                value={selectedTextBox ? selectedTextBox.text : globalQuoteText}
-                onChangeText={applyTextChange}
-                textAlignVertical="top"
-              />
-
-              <View style={styles.sliderSection}>
-                <Text style={styles.sliderLabelText}>Box Width</Text>
-                <Slider
-                  style={styles.sliderLarge}
-                  minimumValue={0.15}
-                  maximumValue={0.85}
-                  value={selectedTextBox?.width_percent ?? textBoxes[0]?.width_percent ?? DEFAULT_TEXT_BOX_WIDTH}
-                  minimumTrackTintColor="#1a73e8"
-                  maximumTrackTintColor="#ddd"
-                  onValueChange={(value) => {
-                    if (selectedTextBox) {
-                      updateTextBox(selectedTextBox.id, { width_percent: value });
-                      return;
-                    }
-
-                    updateAllTextBoxes({ width_percent: value });
-                  }}
-                />
-                <Text style={styles.sliderPercentText}>{Math.round((selectedTextBox?.width_percent ?? textBoxes[0]?.width_percent ?? DEFAULT_TEXT_BOX_WIDTH) * 100)}%</Text>
-              </View>
-
-              <View style={styles.textEditorActionsRow}>
-                <Pressable
-                  onPress={addTextBox}
-                  disabled={textBoxes.length >= MAX_TEXT_BOXES}
-                  style={[styles.secondaryActionButton, textBoxes.length >= MAX_TEXT_BOXES && styles.secondaryActionButtonDisabled]}
-                >
-                  <Text style={styles.secondaryActionButtonText}>Add Text</Text>
-                </Pressable>
-                {selectedTextBox ? (
-                  <Pressable
-                    onPress={() => removeTextBox(selectedTextBox.id)}
-                    disabled={textBoxes.length <= 1}
-                    style={[styles.dangerActionButton, textBoxes.length <= 1 && styles.secondaryActionButtonDisabled]}
-                  >
-                    <Text style={styles.dangerActionButtonText}>Delete</Text>
-                  </Pressable>
-                ) : null}
-              </View>
-
-              <Pressable onPress={() => setModalVisible(false)} style={styles.editCloseButton}>
-                <Text style={styles.editCloseButtonText}>Done</Text>
+              );
+            })}
+            {textBoxes.length < MAX_TEXT_BOXES ? (
+              <Pressable onPress={addTextBox} style={[styles.boxPickerChip, styles.boxPickerAddChip]}>
+                <Icon source="plus" size={18} color="#1a73e8" />
+                <Text style={styles.boxPickerAddText}>Add</Text>
               </Pressable>
-            </ScrollView>
-          </Pressable>
-        );
-      case 'TextPosition':
-        return (
-          <Pressable style={styles.modalBackdrop} onPress={() => setModalVisible(false)}>
-            <View style={[styles.modalContent, { height: screenHeight * 0.35 }]}>
-              <Text style={styles.modalTitle}>Text Position</Text>
-              <View style={styles.sliderSection}>
-                <Text style={styles.sliderLabelText}>X Position</Text>
-                <Slider
-                  style={styles.sliderLarge}
-                  minimumValue={0}
-                  maximumValue={globalPositionXMax}
-                  value={globalPositionX}
-                  minimumTrackTintColor="#1a73e8"
-                  maximumTrackTintColor="#ddd"
-                  onValueChange={(value) => setTextX(value / nativeCanvasWidth)}
-                />
-                <Text style={styles.sliderPercentText}>{Math.round(globalPositionX)}px</Text>
-              </View>
+            ) : null}
+          </ScrollView>
 
-              <View style={styles.sliderSection}>
-                <Text style={styles.sliderLabelText}>Y Position</Text>
-                <Slider
-                  style={styles.sliderLarge}
-                  minimumValue={0}
-                  maximumValue={globalPositionYMax}
-                  value={globalPositionY}
-                  minimumTrackTintColor="#1a73e8"
-                  maximumTrackTintColor="#ddd"
-                  onValueChange={(value) => setTextY(value / nativeCanvasHeight)}
-                />
-                <Text style={styles.sliderPercentText}>{Math.round(globalPositionY)}px</Text>
-              </View>
-            </View>
-          </Pressable>
-        );
-        
-                
-      default:
-        return (
-          <Pressable style={styles.modalBackdrop} onPress={() => setModalVisible(false)}>
-            <View style={[styles.modalContent, { height: screenHeight * 0.3 }]}>
-              <Text style={styles.modalTitle}>Default Modal Content</Text>
-            </View>
-          </Pressable>
-        );
-    }
-  };
+          <View style={styles.alignmentContainer}>
+            <Pressable
+              onPress={() => setTextAlignment(TextAlign.Left)}
+              style={[styles.alignButton, resolvedTextAlign === TextAlign.Left && styles.alignButtonActive]}
+            >
+              <Icon source="format-align-left" size={24} color={resolvedTextAlign === TextAlign.Left ? '#1a73e8' : '#666'} />
+            </Pressable>
+            <Pressable
+              onPress={() => setTextAlignment(TextAlign.Center)}
+              style={[styles.alignButton, resolvedTextAlign === TextAlign.Center && styles.alignButtonActive]}
+            >
+              <Icon source="format-align-center" size={24} color={resolvedTextAlign === TextAlign.Center ? '#1a73e8' : '#666'} />
+            </Pressable>
+            <Pressable
+              onPress={() => setTextAlignment(TextAlign.Right)}
+              style={[styles.alignButton, resolvedTextAlign === TextAlign.Right && styles.alignButtonActive]}
+            >
+              <Icon source="format-align-right" size={24} color={resolvedTextAlign === TextAlign.Right ? '#1a73e8' : '#666'} />
+            </Pressable>
+          </View>
+
+          <Text style={styles.textInputLabel}>
+            {selectedTextBox ? 'Text content for selected box' : 'Text content for all boxes'}
+          </Text>
+          <TextInput
+            ref={selectedTextInputRef}
+            style={styles.quoteTextInput}
+            placeholder="Enter your text here..."
+            placeholderTextColor="#999"
+            multiline
+            value={selectedTextBox ? selectedTextBox.text : globalQuoteText}
+            onChangeText={applyTextChange}
+            textAlignVertical="top"
+          />
+
+          <View style={styles.textEditorActionsRow}>
+            <Pressable
+              onPress={addTextBox}
+              disabled={textBoxes.length >= MAX_TEXT_BOXES}
+              style={[styles.secondaryActionButton, textBoxes.length >= MAX_TEXT_BOXES && styles.secondaryActionButtonDisabled]}
+            >
+              <Text style={styles.secondaryActionButtonText}>Add Text</Text>
+            </Pressable>
+            {selectedTextBox ? (
+              <Pressable
+                onPress={() => removeTextBox(selectedTextBox.id)}
+                disabled={textBoxes.length <= 1}
+                style={[styles.dangerActionButton, textBoxes.length <= 1 && styles.secondaryActionButtonDisabled]}
+              >
+                <Text style={styles.dangerActionButtonText}>Delete</Text>
+              </Pressable>
+            ) : null}
+          </View>
+        </ScrollView>
+      </View>
+    </View>
+  );
 
 
   return (
@@ -1439,81 +1669,88 @@ const imageUri = backgroundImageUri || require("../../assets/test.jpg");
         </View>
       </View>
       <View style={[styles.settingsContainer, { height: settingsPanelHeight }]}>
-          <View style={styles.settingsScrollbarZone}>
-            {showSettingsScrollbar ? (
-              <View style={[styles.settingsScrollbarTrack, { width: scrollbarTrackWidth }]}>
-                <View
-                  style={[
-                    styles.settingsScrollbarThumb,
-                    {
-                      width: scrollbarThumbSize,
-                      height: scrollbarThumbSize,
-                      borderRadius: scrollbarThumbSize / 2,
-                      transform: [{ translateX: scrollbarThumbX }],
-                    },
-                  ]}
-                />
-              </View>
-            ) : null}
-          </View>
-          <View style={[styles.settingsStrip, { height: settingsStripHeight }]}>
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              onLayout={(event) => setSettingsViewportWidth(event.nativeEvent.layout.width)}
-              onContentSizeChange={(contentWidth) => setSettingsContentWidth(contentWidth)}
-              onScroll={(event) => setSettingsScrollX(event.nativeEvent.contentOffset.x)}
-              scrollEventThrottle={16}
-              contentContainerStyle={styles.settingsScrollContent}
-            >
-              {featureColumns.map((column, columnIndex) => (
-                <View
-                  key={`feature-column-${columnIndex}`}
-                  style={[
-                    styles.settingsColumn,
-                    {
-                      width: settingsTileWidth,
-                    },
-                  ]}
-                >
-                  {column.map((feature, index) => (
+          {currentFeature && currentFeature !== 'TextEdit' ? (
+            <View style={[styles.featurePanelHost, { height: settingsPanelHeight }]}>
+              {renderInlineFeatureContent()}
+            </View>
+          ) : (
+            <>
+              <View style={styles.settingsScrollbarZone}>
+                {showSettingsScrollbar ? (
+                  <View style={[styles.settingsScrollbarTrack, { width: scrollbarTrackWidth }]}>
                     <View
-                      key={`feature-item-${columnIndex}-${index}`}
                       style={[
-                        styles.settingsGridItem,
+                        styles.settingsScrollbarThumb,
                         {
-                          width: settingsTileWidth,
-                          height: settingsTileHeight,
+                          width: scrollbarThumbSize,
+                          height: scrollbarThumbSize,
+                          borderRadius: scrollbarThumbSize / 2,
+                          transform: [{ translateX: scrollbarThumbX }],
                         },
                       ]}
-                      onTouchEnd={() => HandleFeature(feature.name)}
+                    />
+                  </View>
+                ) : null}
+              </View>
+              <View style={[styles.settingsStrip, { height: settingsStripHeight }]}>
+                <ScrollView
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  onLayout={(event) => setSettingsViewportWidth(event.nativeEvent.layout.width)}
+                  onContentSizeChange={(contentWidth) => setSettingsContentWidth(contentWidth)}
+                  onScroll={(event) => setSettingsScrollX(event.nativeEvent.contentOffset.x)}
+                  scrollEventThrottle={16}
+                  contentContainerStyle={styles.settingsScrollContent}
+                >
+                  {featureColumns.map((column, columnIndex) => (
+                    <View
+                      key={`feature-column-${columnIndex}`}
+                      style={[
+                        styles.settingsColumn,
+                        {
+                          width: settingsTileWidth,
+                        },
+                      ]}
                     >
-                      <View style={styles.settingsIconCircle}>{feature.icon}</View>
-                      <Text style={styles.settingsGridItemText}>{feature.label}</Text>
+                      {column.map((feature, index) => (
+                        <View
+                          key={`feature-item-${columnIndex}-${index}`}
+                          style={[
+                            styles.settingsGridItem,
+                            {
+                              width: settingsTileWidth,
+                              height: settingsTileHeight,
+                            },
+                          ]}
+                          onTouchEnd={() => HandleFeature(feature.name)}
+                        >
+                          <View style={styles.settingsIconCircle}>{feature.icon}</View>
+                          <Text style={styles.settingsGridItemText}>{feature.label}</Text>
+                        </View>
+                      ))}
                     </View>
                   ))}
-                </View>
-              ))}
-            </ScrollView>
-          </View>
-          <View style={styles.templatesZone}>
-            <Pressable
-              style={styles.templatesButton}
-              onPress={() => setTemplatesModalVisible(true)}
-            >
-              <Text style={styles.templatesButtonText}>Templates</Text>
-            </Pressable>
-          </View>
+                </ScrollView>
+              </View>
+              <View style={styles.templatesZone}>
+                <Pressable
+                  style={styles.templatesButton}
+                  onPress={() => setTemplatesModalVisible(true)}
+                >
+                  <Text style={styles.templatesButtonText}>Templates</Text>
+                </Pressable>
+              </View>
+            </>
+          )}
         </View>
     </View>
       <Modal
-        visible={modalVisible}
+        visible={modalVisible && currentFeature === 'TextEdit'}
         animationType="slide"
         transparent={true}
-        
-        onRequestClose={() => setModalVisible(false)}
+        onRequestClose={closeFeaturePanel}
       >
-        {renderModalContent()}
+        {renderTextEditorModalContent()}
       </Modal>
       <Modal
         visible={exportModalVisible}
@@ -1842,6 +2079,121 @@ const styles = StyleSheet.create({
   settingsStrip: {
     flexShrink: 0,
   },
+  featurePanelHost: {
+    flex: 1,
+    overflow: 'hidden',
+    paddingHorizontal: 12,
+    paddingBottom: 4,
+  },
+  featurePanel: {
+    flex: 1,
+    borderTopLeftRadius: 0,
+    borderTopRightRadius: 0,
+    borderRadius: 0,
+    backgroundColor: '#fff',
+    paddingHorizontal: 10,
+    paddingTop: 8,
+    paddingBottom: 6,
+    overflow: 'hidden',
+    shadowColor: 'transparent',
+    shadowOpacity: 0,
+    shadowRadius: 0,
+    shadowOffset: { width: 0, height: 0 },
+    elevation: 0,
+  },
+  featurePanelHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    gap: 12,
+    marginBottom: 4,
+  },
+  featurePanelTitleWrap: {
+    flex: 1,
+    minWidth: 0,
+  },
+  featurePanelTitle: {
+    fontSize: 18,
+    fontWeight: '800',
+    color: '#222',
+  },
+  featurePanelSubtitle: {
+    marginTop: 2,
+    fontSize: 12,
+    lineHeight: 16,
+    color: '#6b7280',
+  },
+  featurePanelActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    width: '100%',
+  },
+  featureDoneButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#eef4ff',
+    borderWidth: 1,
+    borderColor: '#d8e4ff',
+  },
+  inlineFeatureDoneButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: INLINE_EDITOR_YELLOW,
+    borderWidth: 0,
+  },
+  featurePanelScroll: {
+    flex: 1,
+  },
+  featurePanelBody: {
+    flex: 1,
+    minHeight: 0,
+    paddingBottom: 2,
+    gap: 6,
+  },
+  featureSection: {
+    gap: 8,
+  },
+  featureSectionTitle: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#222',
+  },
+  featureSectionHint: {
+    fontSize: 12,
+    color: '#6b7280',
+  },
+  featureOptionsRow: {
+    flexDirection: 'row',
+    gap: 10,
+    flexWrap: 'wrap',
+  },
+  featureOptionCard: {
+    flexGrow: 1,
+    flexBasis: '30%',
+    minWidth: 84,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: 8,
+    borderRadius: 14,
+    backgroundColor: '#f7f7f8',
+    borderWidth: 1,
+    borderColor: '#ececec',
+    gap: 6,
+  },
+  featureOptionText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#222',
+    textAlign: 'center',
+  },
   settingsGrid: {
     minHeight: '100%',
     flexDirection: 'row',
@@ -1930,6 +2282,79 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '700',
     color: '#222',
+  },
+  fontStrip: {
+    paddingVertical: 4,
+    paddingRight: 6,
+    gap: 10,
+    alignItems: 'center',
+  },
+  fontChip: {
+    minWidth: 120,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+    backgroundColor: '#f7f7f8',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  fontChipActive: {
+    backgroundColor: '#e8f0fe',
+    borderColor: '#1a73e8',
+  },
+  fontChipText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#3f3f46',
+  },
+  fontChipTextActive: {
+    color: '#1a73e8',
+  },
+  weightStrip: {
+    paddingVertical: 4,
+    paddingRight: 6,
+    gap: 10,
+    alignItems: 'center',
+  },
+  weightChip: {
+    minWidth: 100,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+    backgroundColor: '#f7f7f8',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  weightChipActive: {
+    backgroundColor: '#e8f0fe',
+    borderColor: '#1a73e8',
+  },
+  colorPickerWrap: {
+    flex: 1,
+    minHeight: 0,
+    borderRadius: 18,
+    backgroundColor: '#fff',
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+    gap: 6,
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: '#ececec',
+  },
+  colorPickerSurface: {
+    width: '100%',
+    marginBottom: 10,
+    overflow: 'hidden',
+  },
+  colorPickerHueSlider: {
+    width: '100%',
+    height: 14,
+    borderRadius: 14,
+    marginTop: 4,
   },
   templatesBackdrop: {
     flex: 1,
@@ -2130,6 +2555,10 @@ const styles = StyleSheet.create({
     maxWidth: 560,
     alignSelf: 'center',
   },
+  textEditorModalContent: {
+    maxHeight: '88%',
+    gap: 10,
+  },
   modalTitle: {
     fontSize: 18,
     fontWeight: 'bold',
@@ -2137,7 +2566,8 @@ const styles = StyleSheet.create({
     marginBottom: 20,
   },
   textEditorScrollContent: {
-    paddingBottom: 24,
+    paddingBottom: 18,
+    gap: 12,
   },
   boxPickerRow: {
     flexDirection: 'row',
@@ -2198,24 +2628,31 @@ const styles = StyleSheet.create({
     backgroundColor: '#f9f9f9',
   },
   sliderSection: {
-    marginVertical: 20,
-    marginHorizontal: 10,
+    gap: 8,
+    padding: 12,
+    borderRadius: 14,
+    backgroundColor: '#f7f7f8',
+    borderWidth: 1,
+    borderColor: '#ececec',
   },
   sliderLabelText: {
     fontSize: 16,
     fontWeight: '600',
     color: '#222',
-    marginBottom: 12,
   },
   sliderLarge: {
     width: '100%',
-    height: 50,
+    height: 38,
+    marginVertical: 0,
+  },
+  sliderCompact: {
+    width: '100%',
+    height: 34,
     marginVertical: 0,
   },
   sliderPercentText: {
     fontSize: 14,
     color: '#666',
-    marginTop: 8,
     textAlign: 'center',
     fontWeight: '500',
   },
@@ -2223,7 +2660,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: 12,
     marginTop: 8,
-    marginBottom: 16,
+    marginBottom: 10,
   },
   secondaryActionButton: {
     flex: 1,
@@ -2305,8 +2742,9 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-around',
     alignItems: 'flex-start',
-    marginTop: 24,
-    paddingHorizontal: 20,
+    marginTop: 12,
+    paddingHorizontal: 12,
+    gap: 10,
   },
   sizeOption: {
     alignItems: 'center',
@@ -2317,8 +2755,8 @@ const styles = StyleSheet.create({
     opacity: 1,
   },
   squarePreview: {
-    width: 60,
-    height: 60,
+    width: 54,
+    height: 54,
     borderWidth: 2,
     borderColor: '#ddd',
     borderRadius: 4,
@@ -2331,8 +2769,8 @@ const styles = StyleSheet.create({
     backgroundColor: '#e8f0fe',
   },
   storyPreview: {
-    width: 40,
-    height: 70,
+    width: 38,
+    height: 66,
     borderWidth: 2,
     borderColor: '#ddd',
     borderRadius: 4,
@@ -2385,10 +2823,20 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'center',
     gap: 16,
-    marginVertical: 16,
-    paddingBottom: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: '#f0f0f0',
+    paddingVertical: 4,
+  },
+  positionRow: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  positionColumn: {
+    flex: 1,
+    gap: 6,
+    padding: 12,
+    borderRadius: 14,
+    backgroundColor: '#f7f7f8',
+    borderWidth: 1,
+    borderColor: '#ececec',
   },
   alignButton: {
     width: 48,
@@ -2409,7 +2857,6 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
     color: '#222',
-    marginBottom: 8,
   },
   quoteTextInput: {
     borderWidth: 1,
@@ -2420,15 +2867,17 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: '#222',
     backgroundColor: '#f9f9f9',
-    minHeight: 120,
-    marginBottom: 16,
+    minHeight: 110,
   },
   editCloseButton: {
     backgroundColor: '#1a73e8',
-    borderRadius: 8,
+    borderRadius: 999,
     paddingVertical: 12,
     paddingHorizontal: 20,
     alignItems: 'center',
+    justifyContent: 'center',
+    flexDirection: 'row',
+    gap: 8,
   },
   editCloseButtonText: {
     fontSize: 16,
