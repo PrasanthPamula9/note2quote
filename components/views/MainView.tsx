@@ -1,4 +1,5 @@
 import * as React from 'react';
+import { Easing } from 'react-native';
 import { BottomNavigation } from 'react-native-paper';
 import NotesContainer from '../utils/NotesContainer';
 import QuotesContainer from '../utils/QuotesContainer';
@@ -38,8 +39,14 @@ const MainView = () => {
 
   return (
     <BottomNavigation
+      barStyle={{ backgroundColor: 'white', borderTopColor: '#e0e0e0', borderTopWidth: 1 }}
       navigationState={{ index, routes }}
       onIndexChange={setIndex}
+      activeColor="#ffc107"
+      activeIndicatorStyle={{ backgroundColor: 'none' }}
+      sceneAnimationEnabled
+      sceneAnimationType="shifting"
+      sceneAnimationEasing={Easing.out(Easing.cubic)}
       renderScene={({ route }) => {
         switch (route.key) {
           case 'notes':

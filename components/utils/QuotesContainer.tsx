@@ -1,5 +1,11 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { View, StyleSheet } from 'react-native';
+import Animated, {
+  SlideInLeft,
+  SlideInRight,
+  SlideOutLeft,
+  SlideOutRight,
+} from 'react-native-reanimated';
 import QuotesGalleryView from '../views/QuotesGalleryView';
 import QuotesView from '../views/QuotesView';
 import { CanvasPresetKey, Quote } from '../../types/quotes';
@@ -21,13 +27,17 @@ export default function QuotesContainer({
 }: QuotesContainerProps) {
   const { quotes, createQuote, updateQuote, deleteQuote } = useQuotesStore();
   const [viewState, setViewState] = useState<'gallery' | 'editor'>('gallery');
+  const [transitionDirection, setTransitionDirection] = useState<'forward' | 'backward'>('forward');
   const [selectedQuote, setSelectedQuote] = useState<Quote | null>(null);
   const [editorSessionKey, setEditorSessionKey] = useState<string>('new-quote');
   const handledDraftId = useRef<number | null>(null);
+  const enterDuration = 300;
+  const exitDuration = 240;
 
   const handleAddQuote = () => {
     setSelectedQuote(null);
     setEditorSessionKey(`new-${Date.now()}`);
+    setTransitionDirection('forward');
     setViewState('editor');
   };
 
@@ -46,6 +56,7 @@ export default function QuotesContainer({
       });
       setSelectedQuote(savedQuote);
       setEditorSessionKey(savedQuote.id);
+      setTransitionDirection('forward');
       setViewState('editor');
       onDraftConsumed?.();
     };
@@ -56,11 +67,13 @@ export default function QuotesContainer({
   const handleQuotePress = (quote: Quote) => {
     setSelectedQuote(quote);
     setEditorSessionKey(quote.id);
+    setTransitionDirection('forward');
     setViewState('editor');
   };
 
   const handleBack = () => {
     setSelectedQuote(null);
+    setTransitionDirection('backward');
     setViewState('gallery');
   };
 
@@ -140,31 +153,63 @@ export default function QuotesContainer({
   const handleDeleteQuote = async (quoteId: string) => {
     await deleteQuote(quoteId);
     setSelectedQuote(null);
+    setTransitionDirection('backward');
     setViewState('gallery');
   };
 
   return (
     <View style={styles.container}>
-      {viewState === 'gallery' && (
-        <QuotesGalleryView
-          quotes={quotes}
-          onAddQuote={handleAddQuote}
-          onQuotePress={handleQuotePress}
-        />
-      )}
+      <View style={styles.pageStack}>
+        {viewState === 'gallery' && (
+          <Animated.View
+            key="quotes-gallery"
+            style={styles.page}
+            entering={
+              transitionDirection === 'forward'
+                ? SlideInRight.duration(enterDuration)
+                : SlideInLeft.duration(enterDuration)
+            }
+            exiting={
+              transitionDirection === 'forward'
+                ? SlideOutLeft.duration(exitDuration)
+                : SlideOutRight.duration(exitDuration)
+            }
+          >
+            <QuotesGalleryView
+              quotes={quotes}
+              onAddQuote={handleAddQuote}
+              onQuotePress={handleQuotePress}
+            />
+          </Animated.View>
+        )}
 
-      {viewState === 'editor' && (
-        <QuotesView
-          key={editorSessionKey}
-          title={selectedQuote ? 'Edit Quote' : 'New Quote'}
-          initialQuoteText={selectedQuote?.quote_text ?? ''}
-          initialBackgroundImageUri={selectedQuote?.background_image_uri ?? null}
-          initialEditorConfig={selectedQuote?.editor_config ?? null}
-          onBack={handleBack}
-          onSave={handleSaveQuote}
-          onDelete={selectedQuote ? () => handleDeleteQuote(selectedQuote.id) : undefined}
-        />
-      )}
+        {viewState === 'editor' && (
+          <Animated.View
+            key={editorSessionKey}
+            style={styles.page}
+            entering={
+              transitionDirection === 'forward'
+                ? SlideInRight.duration(enterDuration)
+                : SlideInLeft.duration(enterDuration)
+            }
+            exiting={
+              transitionDirection === 'forward'
+                ? SlideOutLeft.duration(exitDuration)
+                : SlideOutRight.duration(exitDuration)
+            }
+          >
+            <QuotesView
+              title={selectedQuote ? 'Edit Quote' : 'New Quote'}
+              initialQuoteText={selectedQuote?.quote_text ?? ''}
+              initialBackgroundImageUri={selectedQuote?.background_image_uri ?? null}
+              initialEditorConfig={selectedQuote?.editor_config ?? null}
+              onBack={handleBack}
+              onSave={handleSaveQuote}
+              onDelete={selectedQuote ? () => handleDeleteQuote(selectedQuote.id) : undefined}
+            />
+          </Animated.View>
+        )}
+      </View>
     </View>
   );
 }
@@ -172,5 +217,13 @@ export default function QuotesContainer({
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+  },
+  pageStack: {
+    flex: 1,
+    position: 'relative',
+    overflow: 'hidden',
+  },
+  page: {
+    ...StyleSheet.absoluteFillObject,
   },
 });

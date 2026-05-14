@@ -1276,16 +1276,18 @@ const imageUri = backgroundImageUri || require("../../assets/test.jpg");
       <Appbar.Header>
         {onBack ? <Appbar.BackAction onPress={onBack} /> : null}
         <Appbar.Content
+          color='#433e3e'
+          titleStyle={{ fontSize: 25, fontWeight: 'bold' }}
           title={title}
-          subtitle={
-            saveStatus === 'saving'
-              ? 'Saving...'
-              : saveStatus === 'saved'
-                ? 'Saved'
-                : saveStatus === 'error'
-                  ? 'Autosave failed'
-                  : 'Autosave on'
-          }
+          // subtitle={
+          //   saveStatus === 'saving'
+          //     ? 'Saving...'
+          //     : saveStatus === 'saved'
+          //       ? 'Saved'
+          //       : saveStatus === 'error'
+          //         ? 'Autosave failed'
+          //         : 'Autosave on'
+          // }
         />
         {onDelete ? (
           <Appbar.Action
@@ -1529,6 +1531,7 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     height: '100%',
+    backgroundColor: '#fff',
     //  backgroundColor: 'red'
 
   },

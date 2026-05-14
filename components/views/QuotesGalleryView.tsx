@@ -56,7 +56,7 @@ export default function QuotesGalleryView({
               <Pressable style={styles.addCard} onPress={onAddQuote}>
                 <View style={styles.addContent}>
                   <View style={styles.addIconCircle}>
-                    <MaterialIcons name="plus" size={36} color="#1a73e8" />
+                    <MaterialIcons name="plus" size={36} color="#433e3e" />
                   </View>
                   <Text style={styles.addLabel}>New Quote</Text>
                 </View>
@@ -101,7 +101,7 @@ export default function QuotesGalleryView({
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f5f1ea',
+    backgroundColor: '#fefefe',
   },
   header: {
     paddingHorizontal: 20,
@@ -111,7 +111,8 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 28,
     fontWeight: '800',
-    color: '#1f1f1f',
+    color: '#433e3e',
+    marginTop:30       
   },
   subtitle: {
     marginTop: 6,
@@ -122,6 +123,7 @@ const styles = StyleSheet.create({
   listContent: {
     paddingHorizontal: 16,
     paddingBottom: 24,
+    marginTop: 8,
   },
   columnWrapper: {
     gap: 12,
@@ -149,8 +151,8 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     marginBottom: 12,
     borderWidth: 1.5,
-    borderColor: '#d6e3f5',
-    backgroundColor: '#eef4ff',
+    borderColor: '#fff',
+    backgroundColor: '#fff',
     shadowColor: '#000',
     shadowOpacity: 0.08,
     shadowRadius: 10,
@@ -187,17 +189,17 @@ const styles = StyleSheet.create({
     width: 72,
     height: 72,
     borderRadius: 36,
-    backgroundColor: '#ffffff',
+    backgroundColor: '#ffc107',
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 14,
     borderWidth: 1,
-    borderColor: '#d6e3f5',
+    borderColor: '#ffc107',
   },
   addLabel: {
     fontSize: 16,
     fontWeight: '700',
-    color: '#1a73e8',
+    color: '#433e3e',
   },
   quoteMark: {
     fontSize: 34,

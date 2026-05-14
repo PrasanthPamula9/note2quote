@@ -287,7 +287,7 @@ const styles = StyleSheet.create({
   createQuoteButton: {
     marginHorizontal: 16,
     marginBottom: 12,
-    backgroundColor: '#1a73e8',
+    backgroundColor: '#ffc107',
     paddingVertical: 14,
     borderRadius: 8,
     alignItems: 'center',
@@ -295,7 +295,7 @@ const styles = StyleSheet.create({
   createQuoteButtonText: {
     fontSize: 16,
     fontWeight: '600',
-    color: '#fff',
+    color: '#433e3e',
   },
   contentInput: {
     fontSize: 16,
@@ -308,7 +308,7 @@ const styles = StyleSheet.create({
   saveButton: {
     marginHorizontal: 16,
     marginBottom: 20,
-    backgroundColor: '#000',
+    backgroundColor: '#ffc107',
     paddingVertical: 14,
     borderRadius: 8,
     alignItems: 'center',
@@ -316,7 +316,7 @@ const styles = StyleSheet.create({
   saveButtonText: {
     fontSize: 16,
     fontWeight: '600',
-    color: '#fff',
+    color: '#433e3e',
   },
   modalOverlay: {
     flex: 1,

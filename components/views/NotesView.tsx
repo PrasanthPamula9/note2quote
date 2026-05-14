@@ -51,8 +51,8 @@ export default function NotesView({
 
   return (
     <SafeAreaView style={styles.container}>
-      <Appbar.Header>
-        <Appbar.Content title="Notes" />
+      <Appbar.Header style={{ backgroundColor: 'transparent', elevation: 0 }}>
+        <Appbar.Content  color="#433e3e" titleStyle={{ fontSize:28 , fontWeight: '800'}} title="Notes" />
       </Appbar.Header>
 
       <FlatList
