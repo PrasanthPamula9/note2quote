@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
-import { View, Text, StyleSheet, useWindowDimensions, Modal, FlatList, Pressable, ScrollView, Alert, TextInput, Platform, PermissionsAndroid } from 'react-native';
-import { Canvas, Rect, Path, Image as SkiaImage, useImage, Paragraph, Skia, TextAlign, FontWeight, FontSlant, useCanvasRef, ImageFormat, StrokeCap } from '@shopify/react-native-skia';
+import { View, Text, StyleSheet, useWindowDimensions, Modal, FlatList, Pressable, ScrollView, Alert, TextInput, Platform, PermissionsAndroid, Image, ActivityIndicator } from 'react-native';
+import { Canvas, Rect, Path, Image as SkiaImage, Group, useImage, Paragraph, Skia, TextAlign, FontWeight, FontSlant, useCanvasRef, ImageFormat, StrokeCap, fitbox } from '@shopify/react-native-skia';
 import { Appbar, Icon } from 'react-native-paper'
 import {listFontFamilies} from "@shopify/react-native-skia";
 import {launchImageLibrary, launchCamera} from 'react-native-image-picker';
@@ -11,6 +11,8 @@ import { QuoteEditorConfig, CanvasPresetKey, QuoteTextBox } from '../../types/qu
 const INLINE_EDITOR_YELLOW = '#ffc107';
 const INLINE_EDITOR_DARK = '#433e3e';
 // ─── Canvas size presets ─────────────────────────────────────────────────────
+type CropRotation = 0 | 90 | 180 | 270;
+
 type CanvasPreset = {
   label: string;
   nativeWidth: number;
@@ -19,6 +21,21 @@ type CanvasPreset = {
 };
 
 type ExportFormat = 'png' | 'jpeg' | 'jpg';
+
+type PendingCropImage = {
+  uri: string;
+  width: number;
+  height: number;
+  label: string;
+};
+
+type BackgroundImageCrop = {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  rotation: CropRotation;
+};
 
 const CANVAS_PRESETS: Record<CanvasPresetKey, CanvasPreset> = {
   // Instagram Feed – square  (1:1)
@@ -69,6 +86,7 @@ const TEXT_BOX_VERTICAL_PADDING = 10;
 const DEFAULT_EDITOR_CONFIG: QuoteEditorConfig = {
   activeCanvasKey: 'instagram_post_square',
   background_image_uri: null,
+  background_image_crop: null,
   image_opacity: 0.6,
   font_size: 14,
   font_color: 'white',
@@ -97,6 +115,61 @@ const clampPercentValue = (value: number, min: number, max: number) =>
 
 const clampDeltaValue = (value: number, minDelta: number, maxDelta: number) =>
   Math.min(maxDelta, Math.max(minDelta, value));
+
+const normalizeCropRotation = (rotation: number): CropRotation => {
+  const normalized = ((Math.round(rotation / 90) * 90) % 360 + 360) % 360;
+  switch (normalized) {
+    case 90:
+    case 180:
+    case 270:
+      return normalized;
+    default:
+      return 0;
+  }
+};
+
+const getNextCropRotation = (rotation: CropRotation): CropRotation => {
+  switch (rotation) {
+    case 0:
+      return 90;
+    case 90:
+      return 180;
+    case 180:
+      return 270;
+    default:
+      return 0;
+  }
+};
+
+const resolveCropRect = (
+  sourceWidth: number,
+  sourceHeight: number,
+  aspectRatio: number,
+  zoom: number,
+  offsetX: number,
+  offsetY: number,
+  rotation: CropRotation,
+) => {
+  const targetAspectRatio = rotation === 90 || rotation === 270 ? 1 / aspectRatio : aspectRatio;
+  const imageAspectRatio = sourceWidth / sourceHeight;
+  const baseCropWidth =
+    imageAspectRatio > targetAspectRatio ? sourceHeight * targetAspectRatio : sourceWidth;
+  const baseCropHeight =
+    imageAspectRatio > targetAspectRatio ? sourceHeight : sourceWidth / targetAspectRatio;
+
+  const cropWidth = Math.max(1, Math.round(baseCropWidth / zoom));
+  const cropHeight = Math.max(1, Math.round(baseCropHeight / zoom));
+  const maxCropX = Math.max(0, sourceWidth - cropWidth);
+  const maxCropY = Math.max(0, sourceHeight - cropHeight);
+
+  return {
+    x: Math.max(0, Math.min(maxCropX, Math.round(maxCropX * offsetX))),
+    y: Math.max(0, Math.min(maxCropY, Math.round(maxCropY * offsetY))),
+    width: cropWidth,
+    height: cropHeight,
+    rotation,
+  };
+};
 
 const createTextBox = (text = '', index = 0): QuoteTextBox => ({
   id: `text-${Date.now()}-${index}-${Math.random().toString(16).slice(2, 6)}`,
@@ -194,6 +267,7 @@ type InlineFeaturePanelProps = {
   onFontSizeChange: (value: number) => void;
   onFontWeightChange: (value: FontWeight) => void;
   onBoxWidthChange: (value: number) => void;
+  onRequestImageCrop: (image: PendingCropImage) => void;
   onImageOpacityChange: (value: number) => void;
   onTextPositionXChange: (value: number) => void;
   onTextPositionYChange: (value: number) => void;
@@ -217,6 +291,162 @@ const InlineFeatureShell = React.memo(function InlineFeatureShell({
       </View>
       <View style={styles.featurePanelBody}>{children}</View>
     </View>
+  );
+});
+
+const ImageCropModal = React.memo(function ImageCropModal({
+  visible,
+  image,
+  aspectRatio,
+  zoom,
+  offsetX,
+  offsetY,
+  rotation,
+  onZoomChange,
+  onOffsetXChange,
+  onOffsetYChange,
+  onRotate,
+  onCancel,
+  onConfirm,
+  saving,
+}: {
+  visible: boolean;
+  image: PendingCropImage | null;
+  aspectRatio: number;
+  zoom: number;
+  offsetX: number;
+  offsetY: number;
+  rotation: CropRotation;
+  onZoomChange: (value: number) => void;
+  onOffsetXChange: (value: number) => void;
+  onOffsetYChange: (value: number) => void;
+  onRotate: () => void;
+  onCancel: () => void;
+  onConfirm: () => void;
+  saving: boolean;
+}) {
+  const { width: screenWidth, height: screenHeight } = useWindowDimensions();
+  const previewImage = useImage(image?.uri);
+
+  if (!visible || !image) {
+    return null;
+  }
+
+  const previewMaxWidth = Math.min(screenWidth - 32, 420);
+  const previewMaxHeight = Math.min(screenHeight * 0.42, 420);
+  let previewWidth = previewMaxWidth;
+  let previewHeight = previewWidth / aspectRatio;
+
+  if (previewHeight > previewMaxHeight) {
+    previewHeight = previewMaxHeight;
+    previewWidth = previewHeight * aspectRatio;
+  }
+
+  const cropRect = resolveCropRect(image.width, image.height, aspectRatio, zoom, offsetX, offsetY, rotation);
+  const previewSourceRect = Skia.XYWHRect(cropRect.x, cropRect.y, cropRect.width, cropRect.height);
+  const previewDestinationRect = Skia.XYWHRect(0, 0, previewWidth, previewHeight);
+  const previewTransform = fitbox('fill', previewSourceRect, previewDestinationRect, rotation);
+
+  return (
+    <Modal visible={visible} transparent animationType="slide" onRequestClose={onCancel}>
+      <View style={styles.cropBackdrop}>
+        <Pressable style={StyleSheet.absoluteFill} onPress={onCancel} />
+        <View style={styles.cropSheet}>
+          <View style={styles.cropHeader}>
+            <View style={styles.cropTitleWrap}>
+              <Text style={styles.cropTitle}>Crop Image</Text>
+              <Text style={styles.cropSubtitle}>{image.label}</Text>
+            </View>
+            <Pressable onPress={onCancel} hitSlop={10} style={styles.cropCloseButton}>
+              <MaterialIcons name="close" size={20} color="#433e3e" />
+            </Pressable>
+          </View>
+
+          <View style={[styles.cropPreviewFrame, { width: previewWidth, height: previewHeight }]}>
+            {previewImage ? (
+              <Canvas style={StyleSheet.absoluteFillObject}>
+                <Group
+                  transform={previewTransform}
+                  clip={Skia.XYWHRect(0, 0, previewWidth, previewHeight)}
+                >
+                  <SkiaImage
+                    image={previewImage}
+                    x={0}
+                    y={0}
+                    width={image.width}
+                    height={image.height}
+                  />
+                </Group>
+              </Canvas>
+            ) : (
+              <View style={styles.cropPreviewLoading}>
+                <ActivityIndicator color="#433e3e" />
+              </View>
+            )}
+            <View style={styles.cropPreviewBorder} pointerEvents="none" />
+          </View>
+
+          <View style={styles.cropControlGroup}>
+            <Text style={styles.cropControlLabel}>Zoom</Text>
+            <Slider
+              style={styles.sliderLarge}
+              minimumValue={1}
+              maximumValue={3}
+              step={0.01}
+              value={zoom}
+              minimumTrackTintColor="#ffc107"
+              maximumTrackTintColor="#433e3e"
+              thumbTintColor="#ffc107"
+              onValueChange={onZoomChange}
+            />
+          </View>
+
+          <View style={styles.cropControlRow}>
+            <View style={styles.cropControlHalf}>
+              <Text style={styles.cropControlLabel}>X</Text>
+              <Slider
+                style={styles.sliderCompact}
+                minimumValue={0}
+                maximumValue={1}
+                step={0.01}
+                value={offsetX}
+                minimumTrackTintColor="#ffc107"
+                maximumTrackTintColor="#433e3e"
+                thumbTintColor="#ffc107"
+                onValueChange={onOffsetXChange}
+              />
+            </View>
+            <View style={styles.cropControlHalf}>
+              <Text style={styles.cropControlLabel}>Y</Text>
+              <Slider
+                style={styles.sliderCompact}
+                minimumValue={0}
+                maximumValue={1}
+                step={0.01}
+                value={offsetY}
+                minimumTrackTintColor="#ffc107"
+                maximumTrackTintColor="#433e3e"
+                thumbTintColor="#ffc107"
+                onValueChange={onOffsetYChange}
+              />
+            </View>
+          </View>
+
+          <View style={styles.cropActionsRow}>
+            <Pressable style={[styles.cropActionButton, styles.cropActionSecondary]} onPress={onCancel}>
+              <Text style={styles.cropActionSecondaryText}>Cancel</Text>
+            </Pressable>
+            <Pressable style={[styles.cropActionButton, styles.cropActionRotate]} onPress={onRotate}>
+              <MaterialIcons name="rotate-right" size={20} color="#433e3e" />
+              <Text style={styles.cropActionRotateText}>Rotate</Text>
+            </Pressable>
+            <Pressable style={[styles.cropActionButton, styles.cropActionPrimary]} onPress={onConfirm} disabled={saving}>
+              <Text style={styles.cropActionPrimaryText}>Save & Crop</Text>
+            </Pressable>
+          </View>
+        </View>
+      </View>
+    </Modal>
   );
 });
 
@@ -255,6 +485,7 @@ const InlineFeaturePanel = React.memo(function InlineFeaturePanel({
   onFontSizeChange,
   onFontWeightChange,
   onBoxWidthChange,
+  onRequestImageCrop,
   onImageOpacityChange,
   onTextPositionXChange,
   onTextPositionYChange,
@@ -290,8 +521,14 @@ const InlineFeaturePanel = React.memo(function InlineFeaturePanel({
               style={styles.featureOptionCard}
               onPress={() => {
                 launchCamera({ mediaType: 'photo' }, (response) => {
-                  if (response.assets && response.assets[0] && response.assets[0].uri) {
-                    onBackgroundImageChange(response.assets[0].uri);
+                  const asset = response.assets?.[0];
+                  if (asset?.uri) {
+                    onRequestImageCrop({
+                      uri: asset.uri,
+                      width: asset.width ?? 0,
+                      height: asset.height ?? 0,
+                      label: 'Camera',
+                    });
                     onClose();
                   }
                 });
@@ -304,8 +541,14 @@ const InlineFeaturePanel = React.memo(function InlineFeaturePanel({
               style={styles.featureOptionCard}
               onPress={() => {
                 launchImageLibrary({ mediaType: 'photo' }, (response) => {
-                  if (response.assets && response.assets[0] && response.assets[0].uri) {
-                    onBackgroundImageChange(response.assets[0].uri);
+                  const asset = response.assets?.[0];
+                  if (asset?.uri) {
+                    onRequestImageCrop({
+                      uri: asset.uri,
+                      width: asset.width ?? 0,
+                      height: asset.height ?? 0,
+                      label: 'Device',
+                    });
                     onClose();
                   }
                 });
@@ -429,10 +672,17 @@ const InlineFeaturePanel = React.memo(function InlineFeaturePanel({
                 }}
                 style={[styles.fontChip, resolvedTextFamily === item && styles.fontChipActive]}
               >
-                <Text style={[styles.fontChipText, resolvedTextFamily === item && styles.fontChipTextActive]} numberOfLines={1}>
-                  {item}
+                <Text
+                  style={[
+                    styles.fontChipPreviewText,
+                    { fontFamily: item },
+                    resolvedTextFamily === item && styles.fontChipTextActive,
+                  ]}
+                  numberOfLines={1}
+                >
+                  Aa
                 </Text>
-                </Pressable>
+              </Pressable>
             ))}
           </ScrollView>
         </InlineFeatureShell>
@@ -619,6 +869,9 @@ export default function QuotesView({
   const [backgroundImageUri, setBackgroundImageUri] = useState<string | null>(
     initialEditorConfig?.background_image_uri ?? initialBackgroundImageUri ?? null,
   );
+  const [backgroundImageCrop, setBackgroundImageCrop] = useState<BackgroundImageCrop | null>(
+    initialEditorConfig?.background_image_crop ?? DEFAULT_EDITOR_CONFIG.background_image_crop,
+  );
   const [modalVisible, setModalVisible] = useState(false);
   const [currentFeature, setCurrentFeature] = useState<string | null>(null);
   const [exportModalVisible, setExportModalVisible] = useState(false);
@@ -632,6 +885,13 @@ export default function QuotesView({
   const [settingsViewportWidth, setSettingsViewportWidth] = useState(0);
   const [settingsContentWidth, setSettingsContentWidth] = useState(0);
   const [templatesModalVisible, setTemplatesModalVisible] = useState(false);
+  const [cropModalVisible, setCropModalVisible] = useState(false);
+  const [pendingCropImage, setPendingCropImage] = useState<PendingCropImage | null>(null);
+  const [cropZoom, setCropZoom] = useState(1);
+  const [cropOffsetX, setCropOffsetX] = useState(0.5);
+  const [cropOffsetY, setCropOffsetY] = useState(0.5);
+  const [cropRotation, setCropRotation] = useState<CropRotation>(0);
+  const [croppingImage, setCroppingImage] = useState(false);
   const [imageOpacity, setImageOpacity] = useState(
     initialEditorConfig?.image_opacity ?? DEFAULT_EDITOR_CONFIG.image_opacity,
   );
@@ -683,6 +943,7 @@ export default function QuotesView({
     const config = initialEditorConfig ?? DEFAULT_EDITOR_CONFIG;
     setActiveCanvasKey(config.activeCanvasKey);
     setBackgroundImageUri(config.background_image_uri ?? initialBackgroundImageUri ?? null);
+    setBackgroundImageCrop(config.background_image_crop ?? null);
     setImageOpacity(config.image_opacity);
     setFontSize(config.font_size);
     setFontColor(config.font_color);
@@ -698,6 +959,12 @@ export default function QuotesView({
     setTextYPercent(config.text_y_percent);
     initialSaveKeyRef.current = null;
   }, []);
+
+  useEffect(() => {
+    if (!backgroundImageUri) {
+      setBackgroundImageCrop(null);
+    }
+  }, [backgroundImageUri]);
 
   useEffect(() => {
     if (currentFeature !== 'TextEdit') {
@@ -830,6 +1097,28 @@ export default function QuotesView({
   }
 const imageUri = backgroundImageUri || require("../../assets/test.jpg");
   const image = useImage(imageUri);
+
+  const backgroundImageCropRect = useMemo(() => {
+    if (!image || !backgroundImageCrop) {
+      return null;
+    }
+
+    const sourceWidth = image.width();
+    const sourceHeight = image.height();
+    const cropWidth = Math.max(1, Math.min(sourceWidth, Math.round(backgroundImageCrop.width)));
+    const cropHeight = Math.max(1, Math.min(sourceHeight, Math.round(backgroundImageCrop.height)));
+    const maxCropX = Math.max(0, sourceWidth - cropWidth);
+    const maxCropY = Math.max(0, sourceHeight - cropHeight);
+    const rotation = normalizeCropRotation(backgroundImageCrop.rotation);
+
+    return {
+      x: clampPercentValue(Math.round(backgroundImageCrop.x), 0, maxCropX),
+      y: clampPercentValue(Math.round(backgroundImageCrop.y), 0, maxCropY),
+      width: cropWidth,
+      height: cropHeight,
+      rotation,
+    };
+  }, [backgroundImageCrop, image]);
 
   const selectedTextBox = useMemo(
     () => textBoxes.find((box) => box.id === selectedTextBoxId) ?? null,
@@ -1118,6 +1407,7 @@ const imageUri = backgroundImageUri || require("../../assets/test.jpg");
     () => ({
       activeCanvasKey,
       background_image_uri: backgroundImageUri,
+      background_image_crop: backgroundImageCrop,
       image_opacity: imageOpacity,
       font_size: selectedTextBox?.font_size ?? fontSize,
       font_color: selectedTextBox?.font_color ?? fontColor,
@@ -1134,6 +1424,7 @@ const imageUri = backgroundImageUri || require("../../assets/test.jpg");
     [
       activeCanvasKey,
       backgroundImageUri,
+      backgroundImageCrop,
       imageOpacity,
       selectedTextBox?.font_size,
       selectedTextBox?.font_color,
@@ -1197,6 +1488,75 @@ const imageUri = backgroundImageUri || require("../../assets/test.jpg");
     };
   }, [autosavePayload, autosavePayloadKey, onSave]);
 
+  const currentCanvasAspectRatio = nativeCanvasWidth / nativeCanvasHeight;
+
+  const openImageCropEditor = async (image: PendingCropImage) => {
+    let resolvedImage = image;
+
+    if (!resolvedImage.width || !resolvedImage.height) {
+      try {
+        const size = await new Promise<{ width: number; height: number }>((resolve, reject) => {
+          Image.getSize(
+            resolvedImage.uri,
+            (width, height) => resolve({ width, height }),
+            reject,
+          );
+        });
+        resolvedImage = {
+          ...resolvedImage,
+          width: size.width,
+          height: size.height,
+        };
+      } catch (error) {
+        console.warn('Could not read image size', error);
+        Alert.alert('Unable to crop image', 'The selected image could not be prepared for cropping.');
+        return;
+      }
+    }
+
+    setPendingCropImage(resolvedImage);
+    setCropZoom(1);
+    setCropOffsetX(0.5);
+    setCropOffsetY(0.5);
+    setCropRotation(0);
+    setCropModalVisible(true);
+  };
+
+  const handleConfirmCrop = () => {
+    if (!pendingCropImage || croppingImage) {
+      return;
+    }
+
+    try {
+      setCroppingImage(true);
+
+      const sourceWidth = pendingCropImage.width;
+      const sourceHeight = pendingCropImage.height;
+      if (sourceWidth <= 0 || sourceHeight <= 0) {
+        throw new Error('The selected image does not have a valid size.');
+      }
+      const crop = resolveCropRect(
+        sourceWidth,
+        sourceHeight,
+        currentCanvasAspectRatio,
+        cropZoom,
+        cropOffsetX,
+        cropOffsetY,
+        cropRotation,
+      );
+
+      setBackgroundImageUri(pendingCropImage.uri);
+      setBackgroundImageCrop(crop);
+      setCropModalVisible(false);
+      setPendingCropImage(null);
+    } catch (error) {
+      console.warn('Crop failed', error);
+      Alert.alert('Crop failed', 'We could not crop the selected image. Please try again.');
+    } finally {
+      setCroppingImage(false);
+    }
+  };
+
   const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
   const exportFormats: Record<ExportFormat, { label: string; extension: string; mime: string; skiaFormat: ImageFormat; quality: number }> = {
@@ -1209,15 +1569,41 @@ const imageUri = backgroundImageUri || require("../../assets/test.jpg");
     <>
       <Rect x={0} y={0} width={renderWidth} height={renderHeight} color={bgColor} />
       {image && (
-        <SkiaImage
-          image={image}
-          opacity={imageOpacity}
-          fit="cover"
-          x={0}
-          y={0}
-          width={renderWidth}
-          height={renderHeight}
-        />
+        backgroundImageCropRect ? (
+          <Group
+            clip={Skia.XYWHRect(0, 0, renderWidth, renderHeight)}
+            transform={fitbox(
+              'fill',
+              Skia.XYWHRect(
+                backgroundImageCropRect.x,
+                backgroundImageCropRect.y,
+                backgroundImageCropRect.width,
+                backgroundImageCropRect.height,
+              ),
+              Skia.XYWHRect(0, 0, renderWidth, renderHeight),
+              backgroundImageCropRect.rotation,
+            )}
+          >
+            <SkiaImage
+              image={image}
+              opacity={imageOpacity}
+              x={0}
+              y={0}
+              width={image.width()}
+              height={image.height()}
+            />
+          </Group>
+        ) : (
+          <SkiaImage
+            image={image}
+            opacity={imageOpacity}
+            fit="cover"
+            x={0}
+            y={0}
+            width={renderWidth}
+            height={renderHeight}
+          />
+        )
       )}
       {textBoxes.map((box, index) => {
         const metric = metrics[index];
@@ -1442,12 +1828,39 @@ const imageUri = backgroundImageUri || require("../../assets/test.jpg");
         onFontSizeChange={setTextSize}
         onFontWeightChange={setTextWeight}
         onBoxWidthChange={setBoxWidth}
+        onRequestImageCrop={openImageCropEditor}
         onImageOpacityChange={HandleOpactyChange}
         onTextPositionXChange={(value) => setTextX(value / nativeCanvasWidth)}
         onTextPositionYChange={(value) => setTextY(value / nativeCanvasHeight)}
       />
     );
   };
+
+  const renderImageCropModal = () => (
+    <ImageCropModal
+      visible={cropModalVisible}
+      image={pendingCropImage}
+      aspectRatio={currentCanvasAspectRatio}
+      zoom={cropZoom}
+      offsetX={cropOffsetX}
+      offsetY={cropOffsetY}
+      rotation={cropRotation}
+      onZoomChange={setCropZoom}
+      onOffsetXChange={setCropOffsetX}
+      onOffsetYChange={setCropOffsetY}
+      onRotate={() => {
+        setCropRotation((current) => getNextCropRotation(current));
+      }}
+      onCancel={() => {
+        setCropModalVisible(false);
+        setPendingCropImage(null);
+        setCropRotation(0);
+        setCroppingImage(false);
+      }}
+      onConfirm={handleConfirmCrop}
+      saving={croppingImage}
+    />
+  );
 
   const renderTextEditorModalContent = () => (
     <View style={styles.modalBackdrop}>
@@ -1744,6 +2157,7 @@ const imageUri = backgroundImageUri || require("../../assets/test.jpg");
           )}
         </View>
     </View>
+      {renderImageCropModal()}
       <Modal
         visible={modalVisible && currentFeature === 'TextEdit'}
         animationType="slide"
@@ -2290,9 +2704,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   fontChip: {
-    minWidth: 120,
+    minWidth: 108,
+    minHeight: 72,
     paddingHorizontal: 14,
-    paddingVertical: 12,
+    paddingVertical: 14,
     borderRadius: 16,
     borderWidth: 1,
     borderColor: '#e5e7eb',
@@ -2304,10 +2719,12 @@ const styles = StyleSheet.create({
     backgroundColor: '#e8f0fe',
     borderColor: '#1a73e8',
   },
-  fontChipText: {
-    fontSize: 13,
-    fontWeight: '700',
+  fontChipPreviewText: {
+    fontSize: 24,
+    fontWeight: '600',
     color: '#3f3f46',
+    textAlign: 'center',
+    includeFontPadding: false,
   },
   fontChipTextActive: {
     color: '#1a73e8',
@@ -2355,6 +2772,140 @@ const styles = StyleSheet.create({
     height: 14,
     borderRadius: 14,
     marginTop: 4,
+  },
+  cropBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.58)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 16,
+  },
+  cropSheet: {
+    width: '100%',
+    maxWidth: 560,
+    backgroundColor: '#fff',
+    borderRadius: 20,
+    padding: 16,
+    gap: 12,
+  },
+  cropHeader: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  cropTitleWrap: {
+    flex: 1,
+    minWidth: 0,
+  },
+  cropTitle: {
+    fontSize: 18,
+    fontWeight: '800',
+    color: '#222',
+  },
+  cropSubtitle: {
+    marginTop: 2,
+    fontSize: 12,
+    color: '#666',
+  },
+  cropCloseButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#f3f4f6',
+  },
+  cropPreviewFrame: {
+    alignSelf: 'center',
+    borderRadius: 14,
+    backgroundColor: '#111',
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: '#d8d8d8',
+  },
+  cropPreviewClip: {
+    flex: 1,
+    overflow: 'hidden',
+    backgroundColor: '#111',
+  },
+  cropPreviewImage: {
+    position: 'absolute',
+  },
+  cropPreviewBorder: {
+    ...StyleSheet.absoluteFillObject,
+    borderRadius: 14,
+    borderWidth: 2,
+    borderColor: '#ffc107',
+  },
+  cropPreviewLoading: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#111',
+  },
+  cropControlGroup: {
+    gap: 8,
+    padding: 12,
+    borderRadius: 14,
+    backgroundColor: '#f7f7f8',
+    borderWidth: 1,
+    borderColor: '#ececec',
+  },
+  cropControlRow: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  cropControlHalf: {
+    flex: 1,
+    gap: 6,
+    padding: 12,
+    borderRadius: 14,
+    backgroundColor: '#f7f7f8',
+    borderWidth: 1,
+    borderColor: '#ececec',
+  },
+  cropControlLabel: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#222',
+  },
+  cropActionsRow: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  cropActionButton: {
+    flex: 1,
+    minHeight: 48,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  cropActionSecondary: {
+    backgroundColor: '#f3f4f6',
+  },
+  cropActionSecondaryText: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#433e3e',
+  },
+  cropActionRotate: {
+    flexDirection: 'row',
+    gap: 6,
+    backgroundColor: '#f3f4f6',
+  },
+  cropActionRotateText: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#433e3e',
+  },
+  cropActionPrimary: {
+    backgroundColor: '#ffc107',
+  },
+  cropActionPrimaryText: {
+    fontSize: 15,
+    fontWeight: '800',
+    color: '#433e3e',
   },
   templatesBackdrop: {
     flex: 1,

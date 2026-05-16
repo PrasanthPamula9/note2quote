@@ -7,6 +7,14 @@ export type CanvasPresetKey =
   | 'instagram_story'
   | 'whatsapp_status';
 
+export type QuoteImageCrop = {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  rotation: 0 | 90 | 180 | 270;
+};
+
 export type QuoteTextBox = {
   id: string;
   text: string;
@@ -25,6 +33,7 @@ export type QuoteTextBox = {
 export type QuoteEditorConfig = {
   activeCanvasKey: CanvasPresetKey;
   background_image_uri: string | null;
+  background_image_crop: QuoteImageCrop | null;
   image_opacity: number;
   font_size: number;
   font_color: string;

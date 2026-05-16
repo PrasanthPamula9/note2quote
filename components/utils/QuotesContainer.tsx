@@ -8,7 +8,7 @@ import Animated, {
 } from 'react-native-reanimated';
 import QuotesGalleryView from '../views/QuotesGalleryView';
 import QuotesView from '../views/QuotesView';
-import { CanvasPresetKey, Quote } from '../../types/quotes';
+import { Quote } from '../../types/quotes';
 import useQuotesStore from '../../hooks/useQuotes';
 
 type QuoteDraftRequest = {
@@ -77,25 +77,11 @@ export default function QuotesContainer({
     setViewState('gallery');
   };
 
-  const handleSaveQuote = async (config: {
-    activeCanvasKey: CanvasPresetKey;
-    background_image_uri: string | null;
-    image_opacity: number;
-    font_size: number;
-    font_color: string;
-    bg_color: string;
-    font_family: string;
-    font_shadow: number;
-    font_weight: Quote['editor_config']['font_weight'];
-    text_align: Quote['editor_config']['text_align'];
-    quote_text: string;
-    text_boxes: Quote['editor_config']['text_boxes'];
-    text_x_percent: number;
-    text_y_percent: number;
-  }) => {
+  const handleSaveQuote = async (config: Quote['editor_config']) => {
     const {
       activeCanvasKey,
       background_image_uri,
+      background_image_crop,
       image_opacity,
       font_size,
       font_color,
@@ -115,6 +101,7 @@ export default function QuotesContainer({
     const editorConfig: Quote['editor_config'] = {
       activeCanvasKey,
       background_image_uri,
+      background_image_crop,
       image_opacity,
       font_size,
       font_color,
@@ -131,7 +118,7 @@ export default function QuotesContainer({
 
     if (selectedQuote) {
       const savedQuote = await updateQuote({
-        ...selectedQuote,
+      ...selectedQuote,
         quote_text: resolvedQuoteText,
         background_image_uri,
         editor_config: editorConfig,

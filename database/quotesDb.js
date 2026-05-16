@@ -63,6 +63,7 @@ function getDefaultEditorConfig() {
   return {
     activeCanvasKey: 'instagram_post_square',
     background_image_uri: null,
+    background_image_crop: null,
     image_opacity: 0.6,
     font_size: 14,
     font_color: 'white',
@@ -208,6 +209,37 @@ function normalizeTextAlign(value) {
   }
 }
 
+function normalizeCropRotation(value) {
+  const normalized = ((Math.round(Number(value) / 90) * 90) % 360 + 360) % 360;
+  switch (normalized) {
+    case 90:
+    case 180:
+    case 270:
+      return normalized;
+    default:
+      return 0;
+  }
+}
+
+function normalizeImageCrop(value) {
+  if (!value || typeof value !== 'object') {
+    return null;
+  }
+
+  const x = Number(value.x);
+  const y = Number(value.y);
+  const width = Number(value.width);
+  const height = Number(value.height);
+
+  return {
+    x: Number.isFinite(x) && x >= 0 ? x : 0,
+    y: Number.isFinite(y) && y >= 0 ? y : 0,
+    width: Number.isFinite(width) && width > 0 ? width : 1,
+    height: Number.isFinite(height) && height > 0 ? height : 1,
+    rotation: normalizeCropRotation(value.rotation),
+  };
+}
+
 function normalizeEditorConfig(config) {
   const base = getDefaultEditorConfig();
   const quoteText = (config?.quote_text ?? base.quote_text).toString();
@@ -218,6 +250,7 @@ function normalizeEditorConfig(config) {
     font_weight: normalizeFontWeight(config?.font_weight ?? base.font_weight),
     text_align: normalizeTextAlign(config?.text_align ?? base.text_align),
     background_image_uri: config?.background_image_uri ?? null,
+    background_image_crop: normalizeImageCrop(config?.background_image_crop),
     quote_text: textBoxes
       .map((box) => String(box.text || '').trim())
       .filter(Boolean)
