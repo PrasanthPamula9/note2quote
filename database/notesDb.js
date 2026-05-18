@@ -46,6 +46,8 @@ const INITIAL_NOTES = [
   },
 ];
 
+const INITIAL_NOTE_IDS = INITIAL_NOTES.map((note) => note.id);
+
 let dbPromise = null;
 
 function generateNoteId() {
@@ -105,6 +107,10 @@ async function getRowCount(db) {
 }
 
 async function seedNotesIfNeeded(db) {
+  if (!__DEV__) {
+    return;
+  }
+
   const count = await getRowCount(db);
   if (count > 0) {
     return;
@@ -118,8 +124,18 @@ async function seedNotesIfNeeded(db) {
   }
 }
 
+async function removeLegacySeedNotesIfNeeded(db) {
+  if (__DEV__ || INITIAL_NOTE_IDS.length === 0) {
+    return;
+  }
+
+  const placeholders = INITIAL_NOTE_IDS.map(() => '?').join(', ');
+  await db.executeSql(`DELETE FROM notes WHERE id IN (${placeholders});`, INITIAL_NOTE_IDS);
+}
+
 async function getNotes() {
   const db = await getDatabase();
+  await removeLegacySeedNotesIfNeeded(db);
   await seedNotesIfNeeded(db);
   const result = getExecuteSqlResult(await db.executeSql(
     'SELECT id, header, body, created_at, updated_at FROM notes ORDER BY updated_at DESC;',

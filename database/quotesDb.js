@@ -1,4 +1,8 @@
 const SQLite = require('react-native-sqlite-storage');
+const {
+  DEFAULT_EDITOR_CONFIG,
+  normalizeQuoteEditorConfig,
+} = require('../utils/quoteConfig');
 
 SQLite.enablePromise(true);
 
@@ -6,9 +10,6 @@ const DB_NAME = 'note2quote.db';
 const DB_VERSION = '1.0';
 const DB_DISPLAY_NAME = 'note2quote';
 const DB_SIZE = 200000;
-const MAX_TEXT_BOXES = 5;
-const DEFAULT_TEXT_BOX_WIDTH = 0.55;
-const DEFAULT_TEXT_BOX_HEIGHT = 0.22;
 
 let dbPromise = null;
 
@@ -26,18 +27,7 @@ function generateQuoteId() {
 
 function mapRow(row) {
   const editorConfig = parseEditorConfig(row.editor_config_json);
-  const textBoxes = Array.isArray(editorConfig.text_boxes) && editorConfig.text_boxes.length > 0
-    ? editorConfig.text_boxes
-    : [
-        {
-          id: 'text-1',
-          text: row.quote_text || editorConfig.quote_text || '',
-          x_percent: 0.05,
-          y_percent: 0.35,
-          width_percent: DEFAULT_TEXT_BOX_WIDTH,
-          height_percent: DEFAULT_TEXT_BOX_HEIGHT,
-        },
-      ];
+  const textBoxes = editorConfig.text_boxes;
   const quoteText = textBoxes
     .map((box) => String(box.text || '').trim())
     .filter(Boolean)
@@ -48,227 +38,34 @@ function mapRow(row) {
     id: row.id,
     quote_text: quoteText,
     background_image_uri: row.background_image_uri || null,
-    editor_config: {
+    editor_config: normalizeQuoteEditorConfig({
       ...editorConfig,
       text_boxes: textBoxes,
       quote_text: quoteText,
       background_image_uri: row.background_image_uri || editorConfig.background_image_uri || null,
-    },
+    }),
     created_at: row.created_at,
     updated_at: row.updated_at,
   };
 }
 
-function getDefaultEditorConfig() {
-  return {
-    activeCanvasKey: 'instagram_post_square',
-    background_image_uri: null,
-    background_image_crop: null,
-    image_opacity: 0.6,
-    font_size: 14,
-    font_color: 'white',
-    bg_color: '#222222',
-    font_family: 'serif',
-    font_shadow: 0,
-    font_weight: 700,
-    text_align: 2,
-    quote_text: '',
-    text_boxes: [
-      {
-        id: 'text-1',
-        text: '',
-        x_percent: 0.05,
-        y_percent: 0.35,
-        width_percent: DEFAULT_TEXT_BOX_WIDTH,
-        height_percent: DEFAULT_TEXT_BOX_HEIGHT,
-      },
-    ],
-    text_x_percent: 0.05,
-    text_y_percent: 0.35,
-  };
-}
-
-function createDefaultTextBox(text, index) {
-  return {
-    id: `text-${index + 1}`,
-    text: (text || '').toString(),
-    x_percent: 0.05,
-    y_percent: Math.min(0.85, 0.35 + index * 0.08),
-    width_percent: DEFAULT_TEXT_BOX_WIDTH,
-    height_percent: DEFAULT_TEXT_BOX_HEIGHT,
-    font_size: undefined,
-    font_color: undefined,
-    font_family: undefined,
-    font_shadow: undefined,
-    font_weight: undefined,
-    text_align: undefined,
-  };
-}
-
-function normalizeTextBox(box, index, fallbackText) {
-  const base = createDefaultTextBox(fallbackText, index);
-  const safeBox = box && typeof box === 'object' ? box : {};
-  return {
-    id: String(safeBox.id || base.id),
-    text: String(safeBox.text ?? base.text ?? fallbackText ?? ''),
-    x_percent: clampPercent(safeBox.x_percent ?? base.x_percent),
-    y_percent: clampPercent(safeBox.y_percent ?? base.y_percent),
-    width_percent: clampPercent(safeBox.width_percent ?? DEFAULT_TEXT_BOX_WIDTH, 0.15, 0.85),
-    height_percent: clampPercent(safeBox.height_percent ?? DEFAULT_TEXT_BOX_HEIGHT, 0.1, 1),
-    ...(safeBox.font_color != null ? { font_color: String(safeBox.font_color) } : {}),
-    ...(safeBox.font_size != null ? { font_size: Number(safeBox.font_size) } : {}),
-    ...(safeBox.font_family != null ? { font_family: String(safeBox.font_family) } : {}),
-    ...(safeBox.font_shadow != null ? { font_shadow: Number(safeBox.font_shadow) } : {}),
-    ...(safeBox.font_weight != null ? { font_weight: normalizeFontWeight(safeBox.font_weight) } : {}),
-    ...(safeBox.text_align != null ? { text_align: normalizeTextAlign(safeBox.text_align) } : {}),
-  };
-}
-
-function normalizeTextBoxes(value, fallbackText) {
-  const boxes = Array.isArray(value) ? value : [];
-  const normalized = boxes.slice(0, MAX_TEXT_BOXES).map((box, index) => normalizeTextBox(box, index, fallbackText));
-
-  if (normalized.length > 0) {
-    const hasText = normalized.some((box) => String(box.text || '').trim().length > 0);
-    if (!hasText && String(fallbackText || '').trim()) {
-      normalized[0] = {
-        ...normalized[0],
-        text: String(fallbackText),
-      };
-    }
-    return normalized;
-  }
-
-  return [createDefaultTextBox(fallbackText, 0)];
-}
-
-function clampPercent(value, min = 0, max = 1) {
-  const parsed = Number(value);
-  if (!Number.isFinite(parsed)) {
-    return min;
-  }
-
-  return Math.min(max, Math.max(min, parsed));
-}
-
-function normalizeFontWeight(value) {
-  if (typeof value === 'number') {
-    return value;
-  }
-
-  const normalized = String(value || '').toLowerCase();
-  switch (normalized) {
-    case 'thin':
-      return 100;
-    case 'extralight':
-    case 'extra_light':
-      return 200;
-    case 'light':
-      return 300;
-    case 'medium':
-      return 500;
-    case 'semibold':
-    case 'semi_bold':
-      return 600;
-    case 'bold':
-      return 700;
-    case 'extrabold':
-    case 'extra_bold':
-      return 800;
-    case 'black':
-      return 900;
-    case 'extrablack':
-    case 'extra_black':
-      return 1000;
-    default:
-      return 700;
-  }
-}
-
-function normalizeTextAlign(value) {
-  if (typeof value === 'number') {
-    return value;
-  }
-
-  const normalized = String(value || '').toLowerCase();
-  switch (normalized) {
-    case 'left':
-      return 0;
-    case 'right':
-      return 1;
-    case 'center':
-      return 2;
-    case 'justify':
-      return 3;
-    case 'start':
-      return 4;
-    case 'end':
-      return 5;
-    default:
-      return 2;
-  }
-}
-
-function normalizeCropRotation(value) {
-  const normalized = ((Math.round(Number(value) / 90) * 90) % 360 + 360) % 360;
-  switch (normalized) {
-    case 90:
-    case 180:
-    case 270:
-      return normalized;
-    default:
-      return 0;
-  }
-}
-
-function normalizeImageCrop(value) {
-  if (!value || typeof value !== 'object') {
-    return null;
-  }
-
-  const x = Number(value.x);
-  const y = Number(value.y);
-  const width = Number(value.width);
-  const height = Number(value.height);
-
-  return {
-    x: Number.isFinite(x) && x >= 0 ? x : 0,
-    y: Number.isFinite(y) && y >= 0 ? y : 0,
-    width: Number.isFinite(width) && width > 0 ? width : 1,
-    height: Number.isFinite(height) && height > 0 ? height : 1,
-    rotation: normalizeCropRotation(value.rotation),
-  };
-}
-
 function normalizeEditorConfig(config) {
-  const base = getDefaultEditorConfig();
-  const quoteText = (config?.quote_text ?? base.quote_text).toString();
-  const textBoxes = normalizeTextBoxes(config?.text_boxes, quoteText);
-  return {
-    ...base,
-    ...config,
-    font_weight: normalizeFontWeight(config?.font_weight ?? base.font_weight),
-    text_align: normalizeTextAlign(config?.text_align ?? base.text_align),
-    background_image_uri: config?.background_image_uri ?? null,
-    background_image_crop: normalizeImageCrop(config?.background_image_crop),
-    quote_text: textBoxes
-      .map((box) => String(box.text || '').trim())
-      .filter(Boolean)
-      .join('\n') || quoteText,
-    text_boxes: textBoxes,
-  };
+  return normalizeQuoteEditorConfig({
+    ...DEFAULT_EDITOR_CONFIG,
+    ...(config || {}),
+  });
 }
 
 function parseEditorConfig(value) {
   if (!value) {
-    return getDefaultEditorConfig();
+    return DEFAULT_EDITOR_CONFIG;
   }
 
   try {
     const parsed = JSON.parse(value);
     return normalizeEditorConfig(parsed);
   } catch (error) {
-    return getDefaultEditorConfig();
+    return DEFAULT_EDITOR_CONFIG;
   }
 }
 
@@ -351,7 +148,7 @@ async function createQuote(input) {
   const db = await getDatabase();
   const now = Date.now();
   const resolvedConfig = {
-    ...getDefaultEditorConfig(),
+    ...DEFAULT_EDITOR_CONFIG,
     ...(editor_config || {}),
     background_image_uri,
     quote_text: quote_text.trim(),

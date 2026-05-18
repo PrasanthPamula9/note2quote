@@ -1,13 +1,33 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
-import { View, Text, StyleSheet, useWindowDimensions, Modal, FlatList, Pressable, ScrollView, Alert, TextInput, Platform, PermissionsAndroid, Image, ActivityIndicator } from 'react-native';
-import { Canvas, Rect, Path, Image as SkiaImage, Group, useImage, Paragraph, Skia, TextAlign, FontWeight, FontSlant, useCanvasRef, ImageFormat, StrokeCap, fitbox } from '@shopify/react-native-skia';
+import { View, Text, StyleSheet, useWindowDimensions, Modal, FlatList, Pressable, ScrollView, Alert, TextInput, Platform, PermissionsAndroid, Image, ImageBackground, ActivityIndicator, Animated, Easing } from 'react-native';
+import { Canvas, Rect, Path, Image as SkiaImage, Group, Picture, useImage, Paragraph, Skia, TextAlign, FontWeight, FontSlant, useCanvasRef, ImageFormat, StrokeCap, fitbox } from '@shopify/react-native-skia';
 import { Appbar, Icon } from 'react-native-paper'
-import {listFontFamilies} from "@shopify/react-native-skia";
 import {launchImageLibrary, launchCamera} from 'react-native-image-picker';
 import Slider from '@react-native-community/slider';
 import MaterialIcons from '@react-native-vector-icons/material-design-icons';
 import ColorPickerComponent, { HueSlider, Panel1 } from 'reanimated-color-picker';
-import { QuoteEditorConfig, CanvasPresetKey, QuoteTextBox } from '../../types/quotes';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { QuoteEditorConfig, CanvasPresetKey, QuoteTemplate, QuoteTextBox } from '../../types/quotes';
+import { DEFAULT_FONT_FAMILY, QUOTE_FONT_CATALOG, type FontCatalogEntry } from '../../utils/fontCatalog';
+import { BUNDLED_FONT_FAMILIES, type BundledFontFamily } from '../../utils/bundledFonts';
+import { useBundledFontProvider } from '../../contexts/BundledFontProviderContext';
+import {
+  BACKGROUND_QUOTE_TEMPLATES,
+  DEFAULT_EDITOR_CONFIG,
+  DEFAULT_QUOTE_TEXT,
+  DEFAULT_TEXT_BOX_HEIGHT,
+  DEFAULT_TEXT_BOX_VERTICAL_GAP,
+  DEFAULT_TEXT_BOX_WIDTH,
+  CANVAS_SIZE_OPTIONS,
+  COLOR_QUOTE_TEMPLATES,
+  MAX_TEXT_BOXES,
+  clampDeltaValue,
+  clampPercentValue,
+  createTextBox,
+  normalizeCropRotation,
+  normalizeTextBoxes,
+  quoteTemplateToEditorConfig,
+} from '../../utils/quoteConfig';
 const INLINE_EDITOR_YELLOW = '#ffc107';
 const INLINE_EDITOR_DARK = '#433e3e';
 // ─── Canvas size presets ─────────────────────────────────────────────────────
@@ -66,67 +86,65 @@ const CANVAS_PRESETS: Record<CanvasPresetKey, CanvasPreset> = {
     nativeHeight: 1920,
     aspectRatio: 1080 / 1920, // 0.5625
   },
-  // WhatsApp Status  (9:16) – identical canvas to Instagram Story
-  whatsapp_status: {
-    label: 'WhatsApp Status',
-    nativeWidth: 1080,
-    nativeHeight: 1920,
-    aspectRatio: 1080 / 1920, // 0.5625
-  },
 };
 
-const DEFAULT_QUOTE_TEXT = 'Go and build something amazing with React Native Skia!';
-const MAX_TEXT_BOXES = 5;
-const DEFAULT_TEXT_BOX_WIDTH = 0.55;
-const DEFAULT_TEXT_BOX_HEIGHT = 0.22;
-const DEFAULT_TEXT_BOX_VERTICAL_GAP = 0.04;
 const TEXT_BOX_HORIZONTAL_PADDING = 12;
 const TEXT_BOX_VERTICAL_PADDING = 10;
+const FONT_PREVIEW_WIDTH = 42;
+const FONT_PREVIEW_HEIGHT = 24;
+const FONT_PREVIEW_CACHE = new Map<string, string>();
 
-const DEFAULT_EDITOR_CONFIG: QuoteEditorConfig = {
-  activeCanvasKey: 'instagram_post_square',
-  background_image_uri: null,
-  background_image_crop: null,
-  image_opacity: 0.6,
-  font_size: 14,
-  font_color: 'white',
-  bg_color: '#222222',
-  font_family: 'serif',
-  font_shadow: 0,
-  font_weight: FontWeight.Bold,
-  text_align: TextAlign.Center,
-  quote_text: DEFAULT_QUOTE_TEXT,
-  text_boxes: [
-    {
-      id: 'text-1',
-      text: DEFAULT_QUOTE_TEXT,
-      x_percent: 0.05,
-      y_percent: 0.35,
-      width_percent: DEFAULT_TEXT_BOX_WIDTH,
-      height_percent: DEFAULT_TEXT_BOX_HEIGHT,
-    },
-  ],
-  text_x_percent: 0.05,
-  text_y_percent: 0.35,
-};
+const LoadingQuoteEditor = React.memo(function LoadingQuoteEditor() {
+  const pulse = useRef(new Animated.Value(0)).current;
 
-const clampPercentValue = (value: number, min: number, max: number) =>
-  Math.min(max, Math.max(min, value));
+  useEffect(() => {
+    const animation = Animated.loop(
+      Animated.sequence([
+        Animated.timing(pulse, {
+          toValue: 1,
+          duration: 850,
+          easing: Easing.inOut(Easing.ease),
+          useNativeDriver: true,
+        }),
+        Animated.timing(pulse, {
+          toValue: 0,
+          duration: 850,
+          easing: Easing.inOut(Easing.ease),
+          useNativeDriver: true,
+        }),
+      ]),
+    );
 
-const clampDeltaValue = (value: number, minDelta: number, maxDelta: number) =>
-  Math.min(maxDelta, Math.max(minDelta, value));
+    animation.start();
+    return () => animation.stop();
+  }, [pulse]);
 
-const normalizeCropRotation = (rotation: number): CropRotation => {
-  const normalized = ((Math.round(rotation / 90) * 90) % 360 + 360) % 360;
-  switch (normalized) {
-    case 90:
-    case 180:
-    case 270:
-      return normalized;
-    default:
-      return 0;
-  }
-};
+  const dotStyle = {
+    opacity: pulse.interpolate({
+      inputRange: [0, 1],
+      outputRange: [0.35, 1],
+    }),
+    transform: [
+      {
+        scale: pulse.interpolate({
+          inputRange: [0, 1],
+          outputRange: [0.9, 1.1],
+        }),
+      },
+    ],
+  } as const;
+
+  return (
+    <View style={styles.loadingScreen}>
+      <View style={styles.loadingCard}>
+        <ActivityIndicator size="large" color="#1a73e8" />
+        <Animated.View style={[styles.loadingDot, dotStyle]} />
+        <Text style={styles.loadingTitle}>Preparing quote editor</Text>
+        <Text style={styles.loadingSubtitle}>Loading bundled fonts and previews...</Text>
+      </View>
+    </View>
+  );
+});
 
 const getNextCropRotation = (rotation: CropRotation): CropRotation => {
   switch (rotation) {
@@ -171,54 +189,6 @@ const resolveCropRect = (
   };
 };
 
-const createTextBox = (text = '', index = 0): QuoteTextBox => ({
-  id: `text-${Date.now()}-${index}-${Math.random().toString(16).slice(2, 6)}`,
-  text,
-  x_percent: 0.05,
-  y_percent: Math.min(0.85, 0.35 + index * DEFAULT_TEXT_BOX_VERTICAL_GAP),
-  width_percent: DEFAULT_TEXT_BOX_WIDTH,
-  height_percent: DEFAULT_TEXT_BOX_HEIGHT,
-  font_color: undefined,
-  font_size: undefined,
-  font_family: undefined,
-  font_shadow: undefined,
-  font_weight: undefined,
-  text_align: undefined,
-});
-
-const normalizeTextBoxes = (boxes?: QuoteTextBox[] | null, fallbackText = DEFAULT_QUOTE_TEXT) => {
-  const source = Array.isArray(boxes) && boxes.length > 0 ? boxes.slice(0, MAX_TEXT_BOXES) : [createTextBox(fallbackText, 0)];
-
-  const normalized = source.map((box, index) => ({
-    id: box.id || `text-${index + 1}`,
-    text: box.text ?? '',
-    x_percent: typeof box.x_percent === 'number' ? box.x_percent : 0.05,
-    y_percent: typeof box.y_percent === 'number' ? box.y_percent : Math.min(0.85, 0.35 + index * DEFAULT_TEXT_BOX_VERTICAL_GAP),
-    width_percent: typeof box.width_percent === 'number'
-      ? clampPercentValue(box.width_percent, 0.15, 0.8)
-      : DEFAULT_TEXT_BOX_WIDTH,
-    height_percent: typeof box.height_percent === 'number'
-      ? clampPercentValue(box.height_percent, 0.1, 1)
-      : DEFAULT_TEXT_BOX_HEIGHT,
-    ...(box.font_color != null ? { font_color: String(box.font_color) } : {}),
-    ...(box.font_size != null ? { font_size: Number(box.font_size) } : {}),
-    ...(box.font_family != null ? { font_family: String(box.font_family) } : {}),
-    ...(box.font_shadow != null ? { font_shadow: Number(box.font_shadow) } : {}),
-    ...(box.font_weight != null ? { font_weight: box.font_weight } : {}),
-    ...(box.text_align != null ? { text_align: box.text_align } : {}),
-  }));
-
-  const hasText = normalized.some((box) => String(box.text || '').trim().length > 0);
-  if (!hasText && String(fallbackText || '').trim()) {
-    normalized[0] = {
-      ...normalized[0],
-      text: String(fallbackText),
-    };
-  }
-
-  return normalized;
-};
-
 type InlineFeatureKey =
   | 'BackgroundImage'
   | 'BackgroundColor'
@@ -235,7 +205,8 @@ type InlineFeatureKey =
 type InlineFeaturePanelProps = {
   feature: InlineFeatureKey;
   activeCanvasKey: CanvasPresetKey;
-  availableFonts: string[];
+  fontOptions: Array<FontCatalogEntry & { available: boolean }>;
+  fontProvider: ReturnType<typeof Skia.TypefaceFontProvider.Make> | null;
   backgroundImageUri: string | null;
   bgColor: string;
   fontColor: string;
@@ -272,6 +243,69 @@ type InlineFeaturePanelProps = {
   onTextPositionXChange: (value: number) => void;
   onTextPositionYChange: (value: number) => void;
 };
+
+const FontPreviewSample = React.memo(function FontPreviewSample({
+  family,
+  provider,
+}: {
+  family: string;
+  provider: ReturnType<typeof Skia.TypefaceFontProvider.Make> | null;
+}) {
+  const [previewUri, setPreviewUri] = useState<string | null>(FONT_PREVIEW_CACHE.get(family) ?? null);
+
+  useEffect(() => {
+    const cached = FONT_PREVIEW_CACHE.get(family);
+    if (cached) {
+      setPreviewUri(cached);
+      return;
+    }
+
+    if (!provider) {
+      return;
+    }
+
+    const surface = Skia.Surface.MakeOffscreen(FONT_PREVIEW_WIDTH, FONT_PREVIEW_HEIGHT);
+    if (!surface) {
+      return;
+    }
+
+    const canvas = surface.getCanvas();
+    canvas.clear(Skia.Color('transparent'));
+
+    const typeface = provider.matchFamilyStyle(family, {
+      weight: FontWeight.Normal,
+      width: 5,
+      slant: FontSlant.Upright,
+    });
+    const font = Skia.Font(typeface, 18);
+    const paint = Skia.Paint();
+    paint.setColor(Skia.Color('#111111'));
+    paint.setAntiAlias(true);
+
+    const metrics = font.getMetrics();
+    const textWidth = font.measureText('Aa').width;
+    const baseline = (FONT_PREVIEW_HEIGHT - (metrics.descent - metrics.ascent)) / 2 - metrics.ascent;
+    const x = Math.max(0, Math.round((FONT_PREVIEW_WIDTH - textWidth) / 2));
+    canvas.drawText('Aa', x, baseline, paint, font);
+    surface.flush();
+
+    const snapshot = surface.makeImageSnapshot();
+    const base64 = snapshot.encodeToBase64(ImageFormat.PNG);
+    const uri = `data:image/png;base64,${base64}`;
+    FONT_PREVIEW_CACHE.set(family, uri);
+    setPreviewUri(uri);
+  }, [family, provider]);
+
+  return (
+    previewUri ? (
+      <Image source={{ uri: previewUri }} style={styles.fontPreviewImage} />
+    ) : (
+      <View style={styles.fontPreviewFallback}>
+        <Text style={styles.fontPreviewFallbackText}>Aa</Text>
+      </View>
+    )
+  );
+});
 
 const InlineFeatureShell = React.memo(function InlineFeatureShell({
   children,
@@ -326,7 +360,6 @@ const ImageCropModal = React.memo(function ImageCropModal({
   saving: boolean;
 }) {
   const { width: screenWidth, height: screenHeight } = useWindowDimensions();
-  const previewImage = useImage(image?.uri);
 
   if (!visible || !image) {
     return null;
@@ -343,9 +376,9 @@ const ImageCropModal = React.memo(function ImageCropModal({
   }
 
   const cropRect = resolveCropRect(image.width, image.height, aspectRatio, zoom, offsetX, offsetY, rotation);
-  const previewSourceRect = Skia.XYWHRect(cropRect.x, cropRect.y, cropRect.width, cropRect.height);
-  const previewDestinationRect = Skia.XYWHRect(0, 0, previewWidth, previewHeight);
-  const previewTransform = fitbox('fill', previewSourceRect, previewDestinationRect, rotation);
+  const previewScale = Math.max(1, zoom);
+  const previewTranslateX = -(offsetX - 0.5) * previewWidth * (previewScale - 1) * 2;
+  const previewTranslateY = -(offsetY - 0.5) * previewHeight * (previewScale - 1) * 2;
 
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onCancel}>
@@ -363,26 +396,21 @@ const ImageCropModal = React.memo(function ImageCropModal({
           </View>
 
           <View style={[styles.cropPreviewFrame, { width: previewWidth, height: previewHeight }]}>
-            {previewImage ? (
-              <Canvas style={StyleSheet.absoluteFillObject}>
-                <Group
-                  transform={previewTransform}
-                  clip={Skia.XYWHRect(0, 0, previewWidth, previewHeight)}
-                >
-                  <SkiaImage
-                    image={previewImage}
-                    x={0}
-                    y={0}
-                    width={image.width}
-                    height={image.height}
-                  />
-                </Group>
-              </Canvas>
-            ) : (
-              <View style={styles.cropPreviewLoading}>
-                <ActivityIndicator color="#433e3e" />
-              </View>
-            )}
+            <ImageBackground
+              source={{ uri: image.uri }}
+              style={[
+                StyleSheet.absoluteFillObject,
+                {
+                  transform: [
+                    { translateX: previewTranslateX },
+                    { translateY: previewTranslateY },
+                    { scale: previewScale },
+                    { rotate: `${rotation}deg` },
+                  ],
+                },
+              ]}
+              imageStyle={styles.cropPreviewFallbackImage}
+            />
             <View style={styles.cropPreviewBorder} pointerEvents="none" />
           </View>
 
@@ -453,7 +481,8 @@ const ImageCropModal = React.memo(function ImageCropModal({
 const InlineFeaturePanel = React.memo(function InlineFeaturePanel({
   feature,
   activeCanvasKey,
-  availableFonts,
+  fontOptions,
+  fontProvider,
   backgroundImageUri,
   bgColor,
   fontColor,
@@ -490,6 +519,7 @@ const InlineFeaturePanel = React.memo(function InlineFeaturePanel({
   onTextPositionXChange,
   onTextPositionYChange,
 }: InlineFeaturePanelProps) {
+  const { width: screenWidth } = useWindowDimensions();
   const [draftColor, setDraftColor] = useState(feature === 'FontColor' ? fontColor : bgColor);
   const [draftOpacity, setDraftOpacity] = useState(imageOpacity);
   const [draftFontSize, setDraftFontSize] = useState(fontSize);
@@ -497,6 +527,11 @@ const InlineFeaturePanel = React.memo(function InlineFeaturePanel({
   const [draftBoxWidth, setDraftBoxWidth] = useState(boxWidth);
   const [draftX, setDraftX] = useState(globalPositionX);
   const [draftY, setDraftY] = useState(globalPositionY);
+  const inlinePickerWidth = Math.max(
+    260,
+    Math.min(screenWidth - 32, screenWidth >= 768 ? 460 : screenWidth <= 390 ? 320 : 390),
+  );
+  const hueSliderHeight = Math.max(12, Math.min(18, Math.round(inlinePickerWidth * 0.045)));
 
   useEffect(() => {
     setDraftColor(feature === 'FontColor' ? fontColor : bgColor);
@@ -574,10 +609,10 @@ const InlineFeaturePanel = React.memo(function InlineFeaturePanel({
     case 'FontColor':
       return (
         <InlineFeatureShell onClose={commitAndClose}>
-          <View style={styles.colorPickerWrap}>
+          <View style={[styles.colorPickerWrap, { width: inlinePickerWidth, alignSelf: 'center' }]}>
             <ColorPickerComponent
               value={draftColor}
-              sliderThickness={14}
+              sliderThickness={hueSliderHeight}
               thumbSize={14}
               thumbShape="circle"
               thumbColor={INLINE_EDITOR_YELLOW}
@@ -602,8 +637,8 @@ const InlineFeaturePanel = React.memo(function InlineFeaturePanel({
                 thumbColor={INLINE_EDITOR_YELLOW}
               />
               <HueSlider
-                style={styles.colorPickerHueSlider}
-                sliderThickness={14}
+                style={[styles.colorPickerHueSlider, { width: inlinePickerWidth - 32, height: hueSliderHeight }]}
+                sliderThickness={hueSliderHeight}
                 thumbShape="circle"
                 thumbSize={14}
                 thumbColor={INLINE_EDITOR_YELLOW}
@@ -663,25 +698,17 @@ const InlineFeaturePanel = React.memo(function InlineFeaturePanel({
       return (
         <InlineFeatureShell onClose={commitAndClose}>
           <ScrollView horizontal nestedScrollEnabled showsHorizontalScrollIndicator={false} contentContainerStyle={styles.fontStrip}>
-            {availableFonts.map((item) => (
+            {fontOptions.map((item) => (
               <Pressable
-                key={item}
+                key={item.family}
                 onPress={() => {
-                  onFontFamilyChange(item);
-                  onClose();
+                  onFontFamilyChange(item.family);
                 }}
-                style={[styles.fontChip, resolvedTextFamily === item && styles.fontChipActive]}
+                style={[styles.fontChip, resolvedTextFamily === item.family && styles.fontChipActive]}
               >
-                <Text
-                  style={[
-                    styles.fontChipPreviewText,
-                    { fontFamily: item },
-                    resolvedTextFamily === item && styles.fontChipTextActive,
-                  ]}
-                  numberOfLines={1}
-                >
-                  Aa
-                </Text>
+                <View style={styles.fontChipPreviewWrap}>
+                  <FontPreviewSample family={item.family} provider={fontProvider} />
+                </View>
               </Pressable>
             ))}
           </ScrollView>
@@ -691,26 +718,28 @@ const InlineFeaturePanel = React.memo(function InlineFeaturePanel({
       return (
         <InlineFeatureShell onClose={commitAndClose}>
           <View style={styles.sizeOptionsContainer}>
-            <Pressable
-              onPress={() => {
-                onCanvasKeyChange('instagram_post_square');
-                onClose();
-              }}
-              style={[styles.sizeOption, activeCanvasKey === 'instagram_post_square' && styles.sizeOptionActive]}
-            >
-              <View style={[styles.squarePreview, activeCanvasKey === 'instagram_post_square' && styles.squarePreviewActive]} />
-              <Text style={styles.sizeLabel}>Square</Text>
-            </Pressable>
-            <Pressable
-              onPress={() => {
-                onCanvasKeyChange('instagram_story');
-                onClose();
-              }}
-              style={[styles.sizeOption, activeCanvasKey === 'instagram_story' && styles.sizeOptionActive]}
-            >
-              <View style={[styles.storyPreview, activeCanvasKey === 'instagram_story' && styles.storyPreviewActive]} />
-              <Text style={styles.sizeLabel}>Story</Text>
-            </Pressable>
+            {CANVAS_SIZE_OPTIONS.map((option) => {
+              const preview = CANVAS_PRESETS[option.key];
+              return (
+                <Pressable
+                  key={option.key}
+                  onPress={() => {
+                    onCanvasKeyChange(option.key);
+                    onClose();
+                  }}
+                  style={[styles.sizeOption, activeCanvasKey === option.key && styles.sizeOptionActive]}
+                >
+                  <View
+                    style={[
+                      styles.sizePreviewBase,
+                      { aspectRatio: preview.aspectRatio },
+                      activeCanvasKey === option.key && styles.sizePreviewActive,
+                    ]}
+                  />
+                  <Text style={styles.sizeLabel}>{option.label}</Text>
+                </Pressable>
+              );
+            })}
           </View>
         </InlineFeatureShell>
       );
@@ -937,8 +966,26 @@ export default function QuotesView({
   const [textYPercent, setTextYPercent] = useState(
     initialEditorConfig?.text_y_percent ?? DEFAULT_EDITOR_CONFIG.text_y_percent,
   );
-  // get available fonts
-  const availableFonts = listFontFamilies();
+  const fontProvider = useBundledFontProvider();
+  const insets = useSafeAreaInsets();
+  const availableFontSet = useMemo(
+    () => new Set<BundledFontFamily>(fontProvider ? BUNDLED_FONT_FAMILIES : []),
+    [fontProvider],
+  );
+  const fontOptions = useMemo(
+    () =>
+      QUOTE_FONT_CATALOG.map((font) => ({
+        ...font,
+        available: availableFontSet.has(font.family as BundledFontFamily),
+      })),
+    [availableFontSet],
+  );
+  const resolveFontFamilyForRender = (family?: string | null) => {
+    if (!family) {
+      return DEFAULT_FONT_FAMILY;
+    }
+    return availableFontSet.has(family as BundledFontFamily) ? family : DEFAULT_FONT_FAMILY;
+  };
   useEffect(() => {
     const config = initialEditorConfig ?? DEFAULT_EDITOR_CONFIG;
     setActiveCanvasKey(config.activeCanvasKey);
@@ -990,13 +1037,19 @@ export default function QuotesView({
   // screen height while preserving the preset's aspect ratio.
   const { width: screenWidth, height: screenHeight } = useWindowDimensions();
   const isTablet = screenWidth >= 768;
+  const isNarrowPhone = screenWidth <= 390 && screenHeight <= 860;
+  const bottomInset = Math.max(insets.bottom, 8);
   const horizontalInset = isTablet ? 24 : 16;
   const headerReserve = isTablet ? 92 : 112;
   const maxDisplayWidth = Math.min(screenWidth - horizontalInset * 2, screenWidth * 0.9, 900);
-  const settingsPanelHeight = Math.max(isTablet ? 220 : 200, screenHeight * 0.28);
+  const bottomReserve = bottomInset + (isTablet ? 12 : isNarrowPhone ? 24 : 18);
+  const settingsPanelHeight = Math.max(
+    isTablet ? 220 : 200,
+    Math.min(screenHeight * (isNarrowPhone ? 0.32 : 0.28), screenHeight - headerReserve - bottomReserve - 24),
+  );
   const maxDisplayHeight = Math.min(
     screenHeight * (isTablet ? 0.56 : 0.44),
-    screenHeight - headerReserve - settingsPanelHeight - 24,
+    screenHeight - headerReserve - settingsPanelHeight - bottomReserve - 24,
   );
   const nativeCanvasWidth = activePreset.nativeWidth;
   const nativeCanvasHeight = activePreset.nativeHeight;
@@ -1013,7 +1066,16 @@ export default function QuotesView({
   const settingsStripHeight = settingsTileHeight * 2 + 16;
   const scrollbarTrackWidth = Math.max(40, Math.floor((settingsTileWidth / 2) * 0.7));
   const scrollbarThumbSize = 8;
-  const inlinePickerHeight = Math.max(118, Math.min(146, Math.round(settingsPanelHeight * 0.6)));
+  const inlinePickerHeight = Math.max(
+    112,
+    Math.min(
+      Math.round(settingsPanelHeight - (isNarrowPhone ? 54 : 48)),
+      Math.round((screenWidth - horizontalInset * 2 - 20) * (isNarrowPhone ? 0.5 : 0.56)),
+    ),
+  );
+  const settingsContainerPaddingBottom = bottomInset + (isNarrowPhone ? 10 : 4);
+  const featurePanelHostPaddingBottom = bottomInset + 8;
+  const templatesZonePaddingBottom = bottomInset + (isNarrowPhone ? 12 : 6);
   const maxSettingsScroll = Math.max(0, settingsContentWidth - settingsViewportWidth);
   const scrollbarUsableWidth = Math.max(0, scrollbarTrackWidth - 6 - scrollbarThumbSize);
   const scrollbarThumbX =
@@ -1084,19 +1146,11 @@ export default function QuotesView({
     label:"Text Position"
   }
 ];
-  const templateOptions = [
-    { key: 'instagram_post_square', label: 'Square' },
-    { key: 'instagram_post_portrait', label: 'Portrait' },
-    { key: 'instagram_post_landscape', label: 'Landscape' },
-    { key: 'instagram_story', label: 'Story' },
-    { key: 'whatsapp_status', label: 'WhatsApp' },
-  ] as const;
   const featureColumns: typeof FeaturesArray[] = [];
   for (let i = 0; i < FeaturesArray.length; i += 2) {
     featureColumns.push(FeaturesArray.slice(i, i + 2));
   }
-const imageUri = backgroundImageUri || require("../../assets/test.jpg");
-  const image = useImage(imageUri);
+  const image = useImage(backgroundImageUri ?? undefined);
 
   const backgroundImageCropRect = useMemo(() => {
     if (!image || !backgroundImageCrop) {
@@ -1119,6 +1173,61 @@ const imageUri = backgroundImageUri || require("../../assets/test.jpg");
       rotation,
     };
   }, [backgroundImageCrop, image]);
+
+  const backgroundPicture = useMemo(() => {
+    if (!image) {
+      return null;
+    }
+
+    const recorder = Skia.PictureRecorder();
+    const canvas = recorder.beginRecording(Skia.XYWHRect(0, 0, nativeCanvasWidth, nativeCanvasHeight));
+    const paint = Skia.Paint();
+    paint.setAlphaf(imageOpacity);
+    paint.setAntiAlias(true);
+
+    const baseSourceRect = backgroundImageCropRect
+      ? {
+        x: backgroundImageCropRect.x,
+        y: backgroundImageCropRect.y,
+        width: backgroundImageCropRect.width,
+        height: backgroundImageCropRect.height,
+      }
+      : {
+        x: 0,
+        y: 0,
+        width: image.width(),
+        height: image.height(),
+      };
+    const destinationRect = Skia.XYWHRect(0, 0, nativeCanvasWidth, nativeCanvasHeight);
+
+    canvas.save();
+    if (backgroundImageCropRect?.rotation) {
+      canvas.rotate(backgroundImageCropRect.rotation, nativeCanvasWidth / 2, nativeCanvasHeight / 2);
+      canvas.drawImageRect(
+        image,
+        Skia.XYWHRect(baseSourceRect.x, baseSourceRect.y, baseSourceRect.width, baseSourceRect.height),
+        Skia.XYWHRect(
+          -nativeCanvasWidth / 2,
+          -nativeCanvasHeight / 2,
+          nativeCanvasWidth,
+          nativeCanvasHeight,
+        ),
+        paint,
+        true,
+      );
+    } else {
+      canvas.drawImageRect(
+        image,
+        Skia.XYWHRect(baseSourceRect.x, baseSourceRect.y, baseSourceRect.width, baseSourceRect.height),
+        destinationRect,
+        paint,
+        true,
+      );
+    }
+    canvas.restore();
+
+    return recorder.finishRecordingAsPicture();
+  }, [backgroundImageCropRect, image, imageOpacity, nativeCanvasHeight, nativeCanvasWidth]);
 
   const selectedTextBox = useMemo(
     () => textBoxes.find((box) => box.id === selectedTextBoxId) ?? null,
@@ -1182,6 +1291,39 @@ const imageUri = backgroundImageUri || require("../../assets/test.jpg");
   const setTextShadow = (value: number) => applyStyleChange({ font_shadow: value }, setFontShadow, value);
   const setTextWeight = (value: FontWeight) => applyStyleChange({ font_weight: value }, setFontWeight, value);
   const setTextAlignment = (value: TextAlign) => applyStyleChange({ text_align: value }, setTextAlign, value);
+
+  const applyTemplatePreset = (template: QuoteTemplate) => {
+    const currentTexts = textBoxes.map((box) => box.text);
+    const normalized = quoteTemplateToEditorConfig(template, quoteText || globalQuoteText || DEFAULT_QUOTE_TEXT);
+    const nextTextBoxes = normalized.text_boxes.map((box, index) => ({
+      ...box,
+      text: currentTexts[index] ?? box.text,
+    }));
+    const nextQuoteText =
+      nextTextBoxes
+        .map((box) => String(box.text || '').trim())
+        .filter(Boolean)
+        .join('\n') || normalized.quote_text;
+
+    setActiveCanvasKey(normalized.activeCanvasKey);
+    setBackgroundImageUri(normalized.background_image_uri);
+    setBackgroundImageCrop(normalized.background_image_crop);
+    setImageOpacity(normalized.image_opacity);
+    setBgColor(normalized.bg_color);
+    setFontSize(normalized.font_size);
+    setFontColor(normalized.font_color);
+    setFontFamily(normalized.font_family);
+    setFontShadow(normalized.font_shadow);
+    setFontWeight(normalized.font_weight);
+    setTextAlign(normalized.text_align);
+    setTextBoxes(nextTextBoxes);
+    setGlobalQuoteText(nextQuoteText);
+    setTextXPercent(normalized.text_x_percent);
+    setTextYPercent(normalized.text_y_percent);
+    setSelectedTextBoxId('');
+    setTemplatesModalVisible(false);
+  };
+
   const setBoxWidth = (value: number) => {
     if (selectedTextBox) {
       updateTextBox(selectedTextBox.id, { width_percent: value });
@@ -1296,12 +1438,13 @@ const imageUri = backgroundImageUri || require("../../assets/test.jpg");
 
   const buildTextBoxMetrics = (layoutWidth: number) =>
     textBoxes.map((box) => {
-      const paragraph = (() => {
-        const builder = Skia.ParagraphBuilder.Make({
+      const resolvedBoxFontFamily = resolveFontFamilyForRender(box.font_family ?? fontFamily);
+    const paragraph = (() => {
+        const paragraphStyle = {
           textAlign: box.text_align ?? textAlign,
           textStyle: {
             color: Skia.Color(box.font_color ?? fontColor),
-            fontFamilies: [box.font_family ?? fontFamily],
+            fontFamilies: [resolvedBoxFontFamily],
             fontSize: box.font_size ?? fontSize,
             fontStyle: {
               weight: box.font_weight ?? fontWeight,
@@ -1312,7 +1455,10 @@ const imageUri = backgroundImageUri || require("../../assets/test.jpg");
                 ? [{ color: Skia.Color('rgba(0,0,0,0.6)'), offset: { x: 1, y: 1 }, blurRadius: box.font_shadow ?? fontShadow }]
                 : [],
           },
-        });
+        };
+        const builder = fontProvider
+          ? Skia.ParagraphBuilder.Make(paragraphStyle, fontProvider)
+          : Skia.ParagraphBuilder.Make(paragraphStyle);
         builder.addText(box.text);
         return builder.build();
       })();
@@ -1333,7 +1479,7 @@ const imageUri = backgroundImageUri || require("../../assets/test.jpg");
 
   const layoutTextBoxMetrics = useMemo(
     () => buildTextBoxMetrics(nativeCanvasWidth),
-    [textBoxes, fontSize, fontFamily, fontColor, fontShadow, fontWeight, textAlign, nativeCanvasWidth],
+    [textBoxes, fontSize, fontFamily, fontColor, fontShadow, fontWeight, textAlign, nativeCanvasWidth, fontProvider, availableFontSet],
   );
 
   const selectedLayoutMetric = useMemo(
@@ -1402,6 +1548,8 @@ const imageUri = backgroundImageUri || require("../../assets/test.jpg");
   const globalPositionYMax = selectedTextBox
     ? Math.max(0, nativeCanvasHeight - selectedLayoutBoxHeight)
     : Math.max(0, nativeCanvasHeight - layoutBounds.height);
+
+  const isFontsReady = Boolean(fontProvider);
 
   const autosavePayload = useMemo(
     () => ({
@@ -1568,43 +1716,7 @@ const imageUri = backgroundImageUri || require("../../assets/test.jpg");
   const renderCanvasContent = (metrics: typeof layoutTextBoxMetrics, renderWidth: number, renderHeight: number) => (
     <>
       <Rect x={0} y={0} width={renderWidth} height={renderHeight} color={bgColor} />
-      {image && (
-        backgroundImageCropRect ? (
-          <Group
-            clip={Skia.XYWHRect(0, 0, renderWidth, renderHeight)}
-            transform={fitbox(
-              'fill',
-              Skia.XYWHRect(
-                backgroundImageCropRect.x,
-                backgroundImageCropRect.y,
-                backgroundImageCropRect.width,
-                backgroundImageCropRect.height,
-              ),
-              Skia.XYWHRect(0, 0, renderWidth, renderHeight),
-              backgroundImageCropRect.rotation,
-            )}
-          >
-            <SkiaImage
-              image={image}
-              opacity={imageOpacity}
-              x={0}
-              y={0}
-              width={image.width()}
-              height={image.height()}
-            />
-          </Group>
-        ) : (
-          <SkiaImage
-            image={image}
-            opacity={imageOpacity}
-            fit="cover"
-            x={0}
-            y={0}
-            width={renderWidth}
-            height={renderHeight}
-          />
-        )
-      )}
+      {backgroundPicture ? <Picture picture={backgroundPicture} /> : null}
       {textBoxes.map((box, index) => {
         const metric = metrics[index];
         const paragraph = metric?.paragraph;
@@ -1796,7 +1908,8 @@ const imageUri = backgroundImageUri || require("../../assets/test.jpg");
         key={currentFeature}
         feature={currentFeature as InlineFeatureKey}
         activeCanvasKey={activeCanvasKey}
-        availableFonts={availableFonts}
+        fontOptions={fontOptions}
+        fontProvider={fontProvider}
         backgroundImageUri={backgroundImageUri}
         bgColor={bgColor}
         fontColor={fontColor}
@@ -1974,6 +2087,7 @@ const imageUri = backgroundImageUri || require("../../assets/test.jpg");
   return (
     <>
     <View style={styles.container}>
+      {!isFontsReady ? <LoadingQuoteEditor /> : null}
       <Appbar.Header>
         {onBack ? <Appbar.BackAction onPress={onBack} /> : null}
         <Appbar.Content
@@ -2010,7 +2124,7 @@ const imageUri = backgroundImageUri || require("../../assets/test.jpg");
         />
       </Appbar.Header>
 
-      <View style={[styles.canvasViewport, { paddingBottom: settingsPanelHeight }]}>
+      <View style={[styles.canvasViewport, { paddingBottom: settingsPanelHeight + bottomReserve }]}>
         <View
           style={[styles.canvas, { width: canvasWidth, height: canvasHeight, marginHorizontal: horizontalInset }]}
         >
@@ -2081,9 +2195,9 @@ const imageUri = backgroundImageUri || require("../../assets/test.jpg");
           </Canvas>
         </View>
       </View>
-      <View style={[styles.settingsContainer, { height: settingsPanelHeight }]}>
+      <View style={[styles.settingsContainer, { height: settingsPanelHeight, paddingBottom: settingsContainerPaddingBottom }]}>
           {currentFeature && currentFeature !== 'TextEdit' ? (
-            <View style={[styles.featurePanelHost, { height: settingsPanelHeight }]}>
+            <View style={[styles.featurePanelHost, { height: settingsPanelHeight, paddingBottom: featurePanelHostPaddingBottom }]}>
               {renderInlineFeatureContent()}
             </View>
           ) : (
@@ -2145,7 +2259,7 @@ const imageUri = backgroundImageUri || require("../../assets/test.jpg");
                   ))}
                 </ScrollView>
               </View>
-              <View style={styles.templatesZone}>
+              <View style={[styles.templatesZone, { paddingBottom: templatesZonePaddingBottom }]}>
                 <Pressable
                   style={styles.templatesButton}
                   onPress={() => setTemplatesModalVisible(true)}
@@ -2293,30 +2407,117 @@ const imageUri = backgroundImageUri || require("../../assets/test.jpg");
                 <MaterialIcons name="close" size={24} color="#222" />
               </Pressable>
             </View>
-            <View style={styles.templateGrid}>
-              {templateOptions.map((template) => {
-                const preview = CANVAS_PRESETS[template.key];
-                return (
-                  <Pressable
-                    key={template.key}
-                    style={styles.templateCard}
-                    onPress={() => {
-                      setActiveCanvasKey(template.key);
-                      setTemplatesModalVisible(false);
-                    }}
-                  >
-                    <View
-                      style={[
-                        styles.templatePreview,
-                        { aspectRatio: preview.aspectRatio },
-                      ]}
-                    >
-                      <Text style={styles.templatePreviewLabel}>{template.label}</Text>
-                    </View>
-                  </Pressable>
-                );
-              })}
-            </View>
+            <ScrollView
+              style={styles.templatesScroll}
+              contentContainerStyle={styles.templatesScrollContent}
+              showsVerticalScrollIndicator={false}
+            >
+              <View style={styles.templateSection}>
+                <Text style={styles.templateSectionTitle}>Color Templates</Text>
+                <View style={styles.templateGrid}>
+                  {COLOR_QUOTE_TEMPLATES.map((template) => {
+                    const preview = CANVAS_PRESETS[template.canvas.preset];
+                    return (
+                      <Pressable
+                        key={template.template_name}
+                        style={styles.templateCard}
+                        onPress={() => applyTemplatePreset(template)}
+                      >
+                        <View
+                          style={[
+                            styles.templatePreview,
+                            { aspectRatio: preview.aspectRatio, backgroundColor: template.background.color },
+                          ]}
+                        >
+                          <View style={styles.templatePreviewTextWrap}>
+                            <Text
+                              style={[
+                                styles.templatePreviewLabel,
+                                {
+                                  color: template.typography.font_color,
+                                  fontSize: 14,
+                                },
+                              ]}
+                              numberOfLines={1}
+                            >
+                              {template.template_name}
+                            </Text>
+                            <Text
+                              style={[
+                                styles.templatePreviewCaption,
+                                {
+                                  color: template.typography.font_color,
+                                },
+                              ]}
+                              numberOfLines={2}
+                            >
+                              Quote + author
+                            </Text>
+                          </View>
+                        </View>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+              </View>
+
+              <View style={styles.templateSection}>
+                <Text style={styles.templateSectionTitle}>Background Templates</Text>
+                {BACKGROUND_QUOTE_TEMPLATES.length > 0 ? (
+                  <View style={styles.templateGrid}>
+                    {BACKGROUND_QUOTE_TEMPLATES.map((template) => {
+                      const preview = CANVAS_PRESETS[template.canvas.preset];
+                      return (
+                        <Pressable
+                          key={template.template_name}
+                          style={styles.templateCard}
+                          onPress={() => applyTemplatePreset(template)}
+                        >
+                          <View
+                            style={[
+                              styles.templatePreview,
+                              { aspectRatio: preview.aspectRatio, backgroundColor: template.background.color },
+                            ]}
+                          >
+                            <View style={styles.templatePreviewTextWrap}>
+                              <Text
+                                style={[
+                                  styles.templatePreviewLabel,
+                                  {
+                                    color: template.typography.font_color,
+                                    fontSize: 14,
+                                  },
+                                ]}
+                                numberOfLines={1}
+                              >
+                                {template.template_name}
+                              </Text>
+                              <Text
+                                style={[
+                                  styles.templatePreviewCaption,
+                                  {
+                                    color: template.typography.font_color,
+                                  },
+                                ]}
+                                numberOfLines={2}
+                              >
+                                Background template
+                              </Text>
+                            </View>
+                          </View>
+                        </Pressable>
+                      );
+                    })}
+                  </View>
+                ) : (
+                  <View style={styles.templateEmptyState}>
+                    <Text style={styles.templateEmptyText}>
+                      Background templates will appear here when they are generated from images.
+                    </Text>
+                  </View>
+                )}
+              </View>
+            </ScrollView>
           </View>
         </View>
       </Modal>
@@ -2571,6 +2772,11 @@ const styles = StyleSheet.create({
     paddingBottom: 2,
     gap: 6,
   },
+  featurePanelBodyContent: {
+    flexGrow: 1,
+    minHeight: 0,
+    gap: 6,
+  },
   featureSection: {
     gap: 8,
   },
@@ -2719,15 +2925,73 @@ const styles = StyleSheet.create({
     backgroundColor: '#e8f0fe',
     borderColor: '#1a73e8',
   },
-  fontChipPreviewText: {
-    fontSize: 24,
-    fontWeight: '600',
-    color: '#3f3f46',
-    textAlign: 'center',
-    includeFontPadding: false,
+  fontChipPreviewWrap: {
+    width: FONT_PREVIEW_WIDTH,
+    height: FONT_PREVIEW_HEIGHT,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  fontChipTextActive: {
-    color: '#1a73e8',
+  fontPreviewFallback: {
+    width: FONT_PREVIEW_WIDTH,
+    height: FONT_PREVIEW_HEIGHT,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  fontPreviewImage: {
+    width: FONT_PREVIEW_WIDTH,
+    height: FONT_PREVIEW_HEIGHT,
+    resizeMode: 'contain',
+  },
+  fontPreviewFallbackText: {
+    fontSize: 18,
+    color: '#6b7280',
+    fontWeight: '600',
+  },
+  loadingScreen: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: '#f7f4ef',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 24,
+    zIndex: 50,
+  },
+  loadingCard: {
+    width: '100%',
+    maxWidth: 320,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 28,
+    paddingHorizontal: 24,
+    borderRadius: 24,
+    backgroundColor: '#fffaf2',
+    borderWidth: 1,
+    borderColor: 'rgba(67, 62, 62, 0.08)',
+    shadowColor: '#000',
+    shadowOpacity: 0.08,
+    shadowRadius: 20,
+    shadowOffset: { width: 0, height: 10 },
+    elevation: 4,
+  },
+  loadingDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: '#1a73e8',
+    marginTop: 14,
+    marginBottom: 14,
+  },
+  loadingTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#2f2b2b',
+    textAlign: 'center',
+  },
+  loadingSubtitle: {
+    marginTop: 6,
+    fontSize: 14,
+    color: '#6b6b6b',
+    textAlign: 'center',
+    lineHeight: 20,
   },
   weightStrip: {
     paddingVertical: 4,
@@ -2819,15 +3083,18 @@ const styles = StyleSheet.create({
   cropPreviewFrame: {
     alignSelf: 'center',
     borderRadius: 14,
-    backgroundColor: '#111',
+    backgroundColor: '#f3f4f6',
     overflow: 'hidden',
     borderWidth: 1,
     borderColor: '#d8d8d8',
   },
+  cropPreviewFallbackImage: {
+    resizeMode: 'cover',
+  },
   cropPreviewClip: {
     flex: 1,
     overflow: 'hidden',
-    backgroundColor: '#111',
+    backgroundColor: '#f3f4f6',
   },
   cropPreviewImage: {
     position: 'absolute',
@@ -2839,10 +3106,11 @@ const styles = StyleSheet.create({
     borderColor: '#ffc107',
   },
   cropPreviewLoading: {
+    ...StyleSheet.absoluteFillObject,
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#111',
+    backgroundColor: 'rgba(243, 244, 246, 0.4)',
   },
   cropControlGroup: {
     gap: 8,
@@ -2921,6 +3189,7 @@ const styles = StyleSheet.create({
     borderRadius: 24,
     padding: 20,
     gap: 16,
+    maxHeight: '88%',
   },
   templatesHeader: {
     flexDirection: 'row',
@@ -2937,6 +3206,22 @@ const styles = StyleSheet.create({
     flexWrap: 'wrap',
     gap: 12,
   },
+  templatesScroll: {
+    flex: 1,
+  },
+  templatesScrollContent: {
+    gap: 18,
+    paddingBottom: 8,
+  },
+  templateSection: {
+    gap: 10,
+  },
+  templateSectionTitle: {
+    fontSize: 15,
+    fontWeight: '800',
+    color: '#1f2937',
+    letterSpacing: 0.2,
+  },
   templateCard: {
     width: '48%',
     borderRadius: 18,
@@ -2950,10 +3235,30 @@ const styles = StyleSheet.create({
     padding: 14,
     justifyContent: 'flex-end',
   },
+  templatePreviewTextWrap: {
+    gap: 2,
+  },
   templatePreviewLabel: {
     fontSize: 13,
     fontWeight: '700',
     color: '#222',
+  },
+  templatePreviewCaption: {
+    fontSize: 11,
+    fontWeight: '600',
+    opacity: 0.86,
+  },
+  templateEmptyState: {
+    borderRadius: 18,
+    backgroundColor: '#f8fafc',
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+    padding: 16,
+  },
+  templateEmptyText: {
+    fontSize: 13,
+    lineHeight: 18,
+    color: '#475569',
   },
   modalBackdrop: {
     flex: 1,
@@ -3305,30 +3610,15 @@ const styles = StyleSheet.create({
   sizeOptionActive: {
     opacity: 1,
   },
-  squarePreview: {
+  sizePreviewBase: {
     width: 54,
-    height: 54,
     borderWidth: 2,
     borderColor: '#ddd',
     borderRadius: 4,
     backgroundColor: '#f5f5f5',
     marginBottom: 12,
   },
-  squarePreviewActive: {
-    borderColor: '#1a73e8',
-    borderWidth: 3,
-    backgroundColor: '#e8f0fe',
-  },
-  storyPreview: {
-    width: 38,
-    height: 66,
-    borderWidth: 2,
-    borderColor: '#ddd',
-    borderRadius: 4,
-    backgroundColor: '#f5f5f5',
-    marginBottom: 12,
-  },
-  storyPreviewActive: {
+  sizePreviewActive: {
     borderColor: '#1a73e8',
     borderWidth: 3,
     backgroundColor: '#e8f0fe',

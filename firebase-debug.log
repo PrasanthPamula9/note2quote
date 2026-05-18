@@ -1,0 +1,25 @@
+[debug] [2026-05-18T11:21:25.493Z] ----------------------------------------------------------------------
+[debug] [2026-05-18T11:21:25.514Z] Command:       C:\nvm4w\nodejs\node.exe C:\Users\prasanth\AppData\Local\npm-cache\_npx\7750544ccf494d8b\node_modules\firebase-tools\lib\bin\firebase.js projects:list
+[debug] [2026-05-18T11:21:25.517Z] CLI Version:   15.18.0
+[debug] [2026-05-18T11:21:25.518Z] Platform:      win32
+[debug] [2026-05-18T11:21:25.519Z] Node Version:  v22.16.0
+[debug] [2026-05-18T11:21:25.520Z] Time:          Mon May 18 2026 16:51:25 GMT+0530 (India Standard Time)
+[debug] [2026-05-18T11:21:25.521Z] ----------------------------------------------------------------------
+[debug] 
+[debug] [2026-05-18T11:21:25.592Z] > command requires scopes: ["email","openid","https://www.googleapis.com/auth/cloudplatformprojects.readonly","https://www.googleapis.com/auth/firebase","https://www.googleapis.com/auth/cloud-platform"]
+[debug] [2026-05-18T11:21:25.594Z] > authorizing via signed-in user (prasanthpamula97@gmail.com)
+[debug] [2026-05-18T11:21:25.605Z] Checked if tokens are valid: true, expires at: 1779106431027
+[debug] [2026-05-18T11:21:25.606Z] Checked if tokens are valid: true, expires at: 1779106431027
+[debug] [2026-05-18T11:21:25.611Z] >>> [apiv2][query] GET https://firebase.googleapis.com/v1beta1/projects pageSize=1000
+[debug] [2026-05-18T11:21:25.492Z] ----------------------------------------------------------------------
+[debug] [2026-05-18T11:21:25.509Z] Command:       C:\nvm4w\nodejs\node.exe C:\Users\prasanth\AppData\Local\npm-cache\_npx\7750544ccf494d8b\node_modules\firebase-tools\lib\bin\firebase.js login:list
+[debug] [2026-05-18T11:21:25.510Z] CLI Version:   15.18.0
+[debug] [2026-05-18T11:21:25.511Z] Platform:      win32
+[debug] [2026-05-18T11:21:25.511Z] Node Version:  v22.16.0
+[debug] [2026-05-18T11:21:25.512Z] Time:          Mon May 18 2026 16:51:25 GMT+0530 (India Standard Time)
+[debug] [2026-05-18T11:21:25.513Z] ----------------------------------------------------------------------
+[debug] 
+[info] Logged in as prasanthpamula97@gmail.com
+[debug] [2026-05-18T11:21:26.783Z] <<< [apiv2][status] GET https://firebase.googleapis.com/v1beta1/projects 200
+[debug] [2026-05-18T11:21:26.784Z] <<< [apiv2][body] GET https://firebase.googleapis.com/v1beta1/projects [omitted]
+[info] No projects found.

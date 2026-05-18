@@ -4,8 +4,7 @@ export type CanvasPresetKey =
   | 'instagram_post_square'
   | 'instagram_post_portrait'
   | 'instagram_post_landscape'
-  | 'instagram_story'
-  | 'whatsapp_status';
+  | 'instagram_story';
 
 export type QuoteImageCrop = {
   x: number;
@@ -46,6 +45,52 @@ export type QuoteEditorConfig = {
   text_boxes: QuoteTextBox[];
   text_x_percent: number;
   text_y_percent: number;
+};
+
+export type QuoteTemplateDiagnostics = {
+  source_image_uri?: string | null;
+  source_image_width?: number | null;
+  source_image_height?: number | null;
+  confidence?: number | null;
+  warnings?: string[];
+  notes?: string | null;
+};
+
+export type QuoteTemplateCanvas = {
+  preset: CanvasPresetKey;
+};
+
+export type QuoteTemplateBackground = {
+  image_uri: string | null;
+  crop: QuoteImageCrop | null;
+  color: string;
+  opacity: number;
+};
+
+export type QuoteTemplateTypography = {
+  font_size: number;
+  font_color: string;
+  font_family: string;
+  font_shadow: number;
+  font_weight: FontWeight;
+  text_align: TextAlign;
+};
+
+export type QuoteTemplateLayout = {
+  quote_text: string;
+  text_boxes: QuoteTextBox[];
+  text_x_percent: number;
+  text_y_percent: number;
+};
+
+export type QuoteTemplate = {
+  schema_version: 1;
+  template_name: string;
+  canvas: QuoteTemplateCanvas;
+  background: QuoteTemplateBackground;
+  typography: QuoteTemplateTypography;
+  layout: QuoteTemplateLayout;
+  diagnostics?: QuoteTemplateDiagnostics;
 };
 
 export interface Quote {

@@ -10,6 +10,10 @@ import QuotesGalleryView from '../views/QuotesGalleryView';
 import QuotesView from '../views/QuotesView';
 import { Quote } from '../../types/quotes';
 import useQuotesStore from '../../hooks/useQuotes';
+import {
+  DEFAULT_QUOTE_TEXT,
+  getRandomColorQuoteEditorConfig,
+} from '../../utils/quoteConfig';
 
 type QuoteDraftRequest = {
   id: number;
@@ -30,12 +34,14 @@ export default function QuotesContainer({
   const [transitionDirection, setTransitionDirection] = useState<'forward' | 'backward'>('forward');
   const [selectedQuote, setSelectedQuote] = useState<Quote | null>(null);
   const [editorSessionKey, setEditorSessionKey] = useState<string>('new-quote');
+  const [draftEditorConfig, setDraftEditorConfig] = useState<Quote['editor_config'] | null>(null);
   const handledDraftId = useRef<number | null>(null);
   const enterDuration = 300;
   const exitDuration = 240;
 
   const handleAddQuote = () => {
     setSelectedQuote(null);
+    setDraftEditorConfig(getRandomColorQuoteEditorConfig(DEFAULT_QUOTE_TEXT));
     setEditorSessionKey(`new-${Date.now()}`);
     setTransitionDirection('forward');
     setViewState('editor');
@@ -50,11 +56,14 @@ export default function QuotesContainer({
     handledDraftId.current = draftQuoteRequest.id;
 
     const openDraftQuote = async () => {
+      const editorConfig = getRandomColorQuoteEditorConfig(draftText);
       const savedQuote = await createQuote({
         quote_text: draftText,
         background_image_uri: null,
+        editor_config: editorConfig,
       });
       setSelectedQuote(savedQuote);
+      setDraftEditorConfig(null);
       setEditorSessionKey(savedQuote.id);
       setTransitionDirection('forward');
       setViewState('editor');
@@ -73,6 +82,7 @@ export default function QuotesContainer({
 
   const handleBack = () => {
     setSelectedQuote(null);
+    setDraftEditorConfig(null);
     setTransitionDirection('backward');
     setViewState('gallery');
   };
@@ -134,6 +144,7 @@ export default function QuotesContainer({
         editor_config: editorConfig,
       });
       setSelectedQuote(savedQuote);
+      setDraftEditorConfig(null);
     }
   };
 
@@ -189,7 +200,7 @@ export default function QuotesContainer({
               title={selectedQuote ? 'Edit Quote' : 'New Quote'}
               initialQuoteText={selectedQuote?.quote_text ?? ''}
               initialBackgroundImageUri={selectedQuote?.background_image_uri ?? null}
-              initialEditorConfig={selectedQuote?.editor_config ?? null}
+              initialEditorConfig={selectedQuote?.editor_config ?? draftEditorConfig}
               onBack={handleBack}
               onSave={handleSaveQuote}
               onDelete={selectedQuote ? () => handleDeleteQuote(selectedQuote.id) : undefined}

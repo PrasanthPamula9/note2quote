@@ -82,8 +82,8 @@ android {
         applicationId "com.note2quote"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 3
-        versionName "1.3.0"
+        versionCode 4
+        versionName "1.4.0"
     }
     signingConfigs {
         debug {
@@ -131,6 +131,26 @@ dependencies {
         implementation("com.facebook.react:hermes-android")
     } else {
         implementation jscFlavor
+    }
+}
+
+// React Native clipboard's release lint task can race its codegen output on newer Gradle/RN setups.
+// Wire the generated codegen task in explicitly so release validation sees a real dependency edge.
+gradle.projectsEvaluated {
+    def clipboardProject = rootProject.findProject(":react-native-clipboard_clipboard")
+    if (clipboardProject != null) {
+        def codegenTask = clipboardProject.tasks.findByName("generateCodegenArtifactsFromSchema")
+        if (codegenTask != null) {
+            clipboardProject.tasks.matching { it.name == "lintVitalAnalyzeRelease" }.configureEach {
+                dependsOn(codegenTask)
+            }
+            def appProject = rootProject.findProject(":app")
+            if (appProject != null) {
+                appProject.tasks.matching { it.name == "collectReleaseDependencies" }.configureEach {
+                    dependsOn(codegenTask)
+                }
+            }
+        }
     }
 }
 

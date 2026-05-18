@@ -10,9 +10,8 @@ import {
 } from 'react-native';
 import MaterialIcons from '@react-native-vector-icons/material-design-icons';
 import { Quote } from '../../types/quotes';
+import { normalizeQuoteEditorConfig } from '../../utils/quoteConfig';
 import { getResponsiveMetrics } from '../utils/responsive';
-
-const QUOTE_BG = require('../../assets/test.jpg');
 
 type QuotesGalleryViewProps = {
   quotes: Quote[];
@@ -35,14 +34,6 @@ export default function QuotesGalleryView({
 }: QuotesGalleryViewProps) {
   const { width, height } = useWindowDimensions();
   const layout = getResponsiveMetrics(width, height);
-
-  const getPreviewTextColor = (quote: Quote) =>
-    quote.editor_config.text_boxes?.[0]?.font_color ?? quote.editor_config.font_color;
-
-  const getBackgroundSource = (quote: Quote) =>
-    quote.editor_config.background_image_uri
-      ? { uri: quote.editor_config.background_image_uri }
-      : QUOTE_BG;
 
   const data: GalleryItem[] = [
     { id: 'add-quote', kind: 'add' },
@@ -116,31 +107,10 @@ export default function QuotesGalleryView({
               ]}
               onPress={() => onQuotePress(item)}
             >
-              <View style={[styles.quoteTile, { backgroundColor: item.editor_config.bg_color, borderRadius: layout.cardRadius }]}>
-                <ImageBackground
-                  source={getBackgroundSource(item)}
-                  style={styles.heroImage}
-                  imageStyle={[styles.heroImageMask, { opacity: item.editor_config.image_opacity }]}
-                >
-                  <View style={[styles.heroOverlay, { backgroundColor: item.editor_config.bg_color }]} />
-                </ImageBackground>
-                <View style={styles.quoteBody}>
-                  <Text
-                    style={[styles.quoteMark, { color: getPreviewTextColor(item), fontSize: layout.titleSize }]}
-                  >
-                    {'"'}
-                  </Text>
-                  <Text
-                    style={[styles.quoteText, { color: getPreviewTextColor(item), fontSize: layout.bodySize }]}
-                    numberOfLines={4}
-                  >
-                    {item.quote_text}
-                  </Text>
-                  <Text style={[styles.dateText, { color: getPreviewTextColor(item), fontSize: layout.smallTextSize }]}>
-                    {formatDate(item.updated_at)}
-                  </Text>
-                </View>
-              </View>
+              <QuoteGalleryPreview
+                quote={item}
+                cardRadius={layout.cardRadius}
+              />
             </Pressable>
           );
         }}
@@ -151,6 +121,44 @@ export default function QuotesGalleryView({
           </View>
         }
       />
+    </View>
+  );
+}
+
+function QuoteGalleryPreview({
+  quote,
+  cardRadius,
+}: {
+  quote: Quote;
+  cardRadius: number;
+}) {
+  const config = normalizeQuoteEditorConfig(quote.editor_config);
+  const backgroundSource = config.background_image_uri ? { uri: config.background_image_uri } : null;
+  const previewText = config.quote_text?.trim() || quote.quote_text || 'Quote';
+
+  return (
+    <View style={[styles.quoteTile, { backgroundColor: config.bg_color, borderRadius: cardRadius }]}>
+      {backgroundSource ? (
+        <ImageBackground
+          source={backgroundSource}
+          style={styles.heroImage}
+          imageStyle={[styles.heroImageMask, { opacity: config.image_opacity }]}
+        />
+      ) : null}
+      <View style={[styles.heroOverlay, { backgroundColor: config.bg_color, opacity: backgroundSource ? 0.12 : 0.04 }]} />
+      <View style={styles.quoteBody}>
+        <Text style={[styles.quoteMark, { color: config.font_color }]}>{"\""}</Text>
+        <Text
+          style={[
+            styles.quoteText,
+            { color: config.font_color },
+          ]}
+          numberOfLines={4}
+        >
+          {previewText}
+        </Text>
+        <Text style={[styles.dateText, { color: config.font_color }]}>{formatDate(quote.updated_at)}</Text>
+      </View>
     </View>
   );
 }
@@ -195,6 +203,40 @@ const styles = StyleSheet.create({
     flex: 1,
     overflow: 'hidden',
   },
+  heroImage: {
+    position: 'absolute',
+    left: 0,
+    top: 0,
+    right: 0,
+    bottom: 0,
+  },
+  heroImageMask: {
+    resizeMode: 'cover',
+  },
+  heroOverlay: {
+    ...StyleSheet.absoluteFillObject,
+  },
+  quoteBody: {
+    flex: 1,
+    paddingHorizontal: 14,
+    paddingTop: 12,
+    paddingBottom: 14,
+    justifyContent: 'space-between',
+    backgroundColor: 'transparent',
+  },
+  quoteMark: {
+    fontWeight: '700',
+  },
+  quoteText: {
+    lineHeight: 22,
+    fontWeight: '600',
+    flex: 1,
+    marginTop: 8,
+    marginBottom: 12,
+  },
+  dateText: {
+    opacity: 0.7,
+  },
   addCard: {
     flex: 1,
     aspectRatio: 1,
@@ -207,25 +249,6 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 6 },
     elevation: 2,
     overflow: 'hidden',
-  },
-  heroImage: {
-    ...StyleSheet.absoluteFillObject,
-    width: '100%',
-  },
-  heroImageMask: {
-    resizeMode: 'cover',
-  },
-  heroOverlay: {
-    ...StyleSheet.absoluteFillObject,
-    opacity: 0.15,
-  },
-  quoteBody: {
-    flex: 1,
-    paddingHorizontal: 14,
-    paddingTop: 12,
-    paddingBottom: 14,
-    justifyContent: 'space-between',
-    backgroundColor: 'transparent',
   },
   addContent: {
     flex: 1,
@@ -244,19 +267,6 @@ const styles = StyleSheet.create({
   addLabel: {
     fontWeight: '700',
     color: '#433e3e',
-  },
-  quoteMark: {
-    fontWeight: '700',
-  },
-  quoteText: {
-    lineHeight: 22,
-    fontWeight: '600',
-    flex: 1,
-    marginTop: 8,
-    marginBottom: 12,
-  },
-  dateText: {
-    opacity: 0.7,
   },
   emptyState: {
     marginTop: 40,

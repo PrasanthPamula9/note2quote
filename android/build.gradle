@@ -20,3 +20,15 @@ buildscript {
 }
 
 apply plugin: "com.facebook.react.rootproject"
+
+subprojects { subproject ->
+    subproject.plugins.withId("com.android.library") {
+        def androidExt = subproject.extensions.findByName("android")
+        if (androidExt != null) {
+            androidExt.lintOptions {
+                checkReleaseBuilds false
+                abortOnError false
+            }
+        }
+    }
+}

@@ -11,6 +11,7 @@ import { Provider as PaperProvider } from 'react-native-paper';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { enableScreens } from 'react-native-screens';
 import MainView from './components/views/MainView';
+import { BundledFontProviderGate } from './contexts/BundledFontProviderContext';
 
 enableScreens(true);
 
@@ -22,8 +23,9 @@ function App() {
       <GestureHandlerRootView style={{ flex: 1 }}>
         <PaperProvider>
           <StatusBar barStyle={isDarkMode ? 'light-content' : 'dark-content'} />
-          {/* <AppContent /> */}
-          <MainView />
+          <BundledFontProviderGate>
+            <MainView />
+          </BundledFontProviderGate>
         </PaperProvider>
       </GestureHandlerRootView>
     </SafeAreaProvider>

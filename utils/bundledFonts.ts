@@ -1,0 +1,36 @@
+export const BUNDLED_FONT_ASSETS = {
+  'Inter': require('../assets/fonts/inter.ttf'),
+  'Poppins': require('../assets/fonts/poppins.ttf'),
+  'Lato': require('../assets/fonts/lato.ttf'),
+  'Open Sans': require('../assets/fonts/opensans.ttf'),
+  'Nunito Sans': require('../assets/fonts/nunitosans.ttf'),
+  'Work Sans': require('../assets/fonts/worksans.ttf'),
+  'Raleway': require('../assets/fonts/raleway.ttf'),
+  'Montserrat': require('../assets/fonts/montserrat.ttf'),
+  'Playfair Display': require('../assets/fonts/playfairdisplay.ttf'),
+  'Lora': require('../assets/fonts/lora.ttf'),
+  'Merriweather': require('../assets/fonts/merriweather.ttf'),
+  'Libre Baskerville': require('../assets/fonts/librebaskerville.ttf'),
+  'Cormorant Garamond': require('../assets/fonts/cormorantgaramond.ttf'),
+  'EB Garamond': require('../assets/fonts/ebgaramond.ttf'),
+  'Crimson Pro': require('../assets/fonts/crimsonpro.ttf'),
+  'Bebas Neue': require('../assets/fonts/bebasneue.ttf'),
+  'Anton': require('../assets/fonts/anton.ttf'),
+  'Oswald': require('../assets/fonts/oswald.ttf'),
+  'Archivo Black': require('../assets/fonts/archivoblack.ttf'),
+  'League Spartan': require('../assets/fonts/leaguespartan.ttf'),
+  'Great Vibes': require('../assets/fonts/greatvibes.ttf'),
+  'Dancing Script': require('../assets/fonts/dancingscript.ttf'),
+  'Satisfy': require('../assets/fonts/satisfy.ttf'),
+  'Caveat': require('../assets/fonts/caveat.ttf'),
+  'Sacramento': require('../assets/fonts/sacramento.ttf'),
+  'Special Elite': require('../assets/fonts/specialelite.ttf'),
+  'Courier Prime': require('../assets/fonts/courierprime.ttf'),
+  'Cutive Mono': require('../assets/fonts/cutivemono.ttf'),
+  'IBM Plex Mono': require('../assets/fonts/ibmplexmono.ttf'),
+  'Space Mono': require('../assets/fonts/spacemono.ttf'),
+} as const;
+
+export type BundledFontFamily = keyof typeof BUNDLED_FONT_ASSETS;
+
+export const BUNDLED_FONT_FAMILIES = Object.keys(BUNDLED_FONT_ASSETS) as BundledFontFamily[];

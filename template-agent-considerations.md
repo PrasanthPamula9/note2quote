@@ -1,6 +1,21 @@
 # Template Agent Considerations
 
-If you want an AI agent to generate quote templates from reference images, the most important thing is to define a strict template contract first and make the agent output only that contract.
+If you want an AI agent to generate quote templates from reference images, define one strict template contract and make the agent output only that contract.
+
+The app now treats the nested template JSON below as the canonical interchange format. The editor and database can convert it into the flat runtime config, so the agent should not invent its own shape.
+
+## SQLite Storage Shape
+
+The actual SQLite table for quotes is:
+
+- `id TEXT PRIMARY KEY NOT NULL`
+- `quote_text TEXT NOT NULL`
+- `background_image_uri TEXT`
+- `editor_config_json TEXT`
+- `created_at INTEGER NOT NULL`
+- `updated_at INTEGER NOT NULL`
+
+That means any backend-generated template must ultimately serialize into `editor_config_json` using the app's `QuoteEditorConfig` shape. The nested template format is useful for generation, but the saved record still has to land in the SQLite row above.
 
 ## Key Considerations
 
@@ -16,31 +31,67 @@ If you want an AI agent to generate quote templates from reference images, the m
 - Handle missing or unavailable fonts with fallback values.
 - Make sure the agent returns machine-readable JSON only, not mixed prose.
 
-## Current App Schema
+## Canonical Template Schema
 
-The current saved shape already gives a good target:
+This is the template contract the agent should emit:
 
-- `activeCanvasKey`
-- `background_image_uri`
-- `image_opacity`
-- `bg_color`
-- `font_size`
-- `font_color`
-- `font_family`
-- `font_shadow`
-- `font_weight`
-- `text_align`
-- `quote_text`
-- `text_boxes`
-- `text_x_percent`
-- `text_y_percent`
+```json
+{
+  "schema_version": 1,
+  "template_name": "Minimal Quote Card",
+  "canvas": {
+    "preset": "instagram_post_square"
+  },
+  "background": {
+    "image_uri": null,
+    "crop": null,
+    "color": "#222222",
+    "opacity": 0.6
+  },
+  "typography": {
+    "font_size": 14,
+    "font_color": "white",
+    "font_family": "serif",
+    "font_shadow": 0,
+    "font_weight": 700,
+    "text_align": 2
+  },
+  "layout": {
+    "quote_text": "Be the change you want to see.",
+    "text_boxes": [
+      {
+        "id": "text-1",
+        "text": "Be the change",
+        "x_percent": 0.08,
+        "y_percent": 0.24,
+        "width_percent": 0.84,
+        "height_percent": 0.18
+      }
+    ],
+    "text_x_percent": 0.08,
+    "text_y_percent": 0.24
+  },
+  "diagnostics": {
+    "source_image_uri": null,
+    "source_image_width": null,
+    "source_image_height": null,
+    "confidence": 0.91,
+    "warnings": [],
+    "notes": "Optional agent notes"
+  }
+}
+```
 
-That means the agent should ideally generate:
+## Mapping Rules
 
-- the canvas preset
-- the background style
-- the global defaults
-- the text box array with positions and styles
+- `canvas.preset` must always be one of the supported canvas keys.
+- `background.image_uri` is the source or reference image URI, if the template uses one.
+- `background.crop` should use source-image pixels when available.
+- `typography` describes the global defaults for all editable text boxes.
+- `layout.text_boxes` is the editable structure the editor actually uses.
+- `layout.quote_text` should match the visible text after joining the editable boxes.
+- `diagnostics` is for review only and should never affect rendering.
+- For built-in color templates, always create two boxes: one for the quote and one for the author line.
 
 ## Recommended Template Rules
 
@@ -59,81 +110,21 @@ That means the agent should ideally generate:
 2. Detect the canvas ratio and map it to the nearest preset.
 3. Detect text regions and sort them top to bottom.
 4. Extract text content with OCR.
-5. Estimate each box’s position and width in percentages.
+5. Estimate each box position and width in percentages.
 6. Infer font style tokens only if they are supported by the app.
-7. Generate JSON matching the SQLite save schema.
+7. Generate JSON matching the template schema.
 8. Validate the JSON against schema rules.
 9. Render a preview.
 10. Let a human approve or tweak before saving.
 
 ## Important Design Choices
 
-- Don’t let the agent invent unsupported fields.
-- Don’t store raw image coordinates if the editor uses relative layout.
-- Don’t let OCR text overwrite the editable layout unless that is explicitly intended.
-- Don’t depend on one-shot output; use generate, validate, preview, correct.
+- Do not let the agent invent unsupported fields.
+- Do not store raw image coordinates if the editor uses relative layout.
+- Do not let OCR text overwrite the editable layout unless that is explicitly intended.
+- Do not depend on one-shot output; use generate, validate, preview, correct.
 - Keep a fallback mode for templates that are image-only.
-
-## Useful Extra Fields For The Agent Output
-
-If you want better reliability, have the agent also return:
-
-- `template_name`
-- `source_image_width`
-- `source_image_height`
-- `confidence`
-- `warnings`
-- `detected_text_regions`
-- `ocr_text`
-- `notes`
-
-That gives you a better debugging trail without changing the actual editor schema.
 
 ## Practical Rule
 
-The agent should output two things:
-
-- a strict `editor_config` JSON for saving
-- a diagnostic section for review
-
-## Example Output Shape
-
-```json
-{
-  "template_name": "Minimal Quote Card",
-  "activeCanvasKey": "instagram_post_square",
-  "background_image_uri": null,
-  "image_opacity": 0.6,
-  "bg_color": "#222222",
-  "font_size": 14,
-  "font_color": "white",
-  "font_family": "serif",
-  "font_shadow": 0,
-  "font_weight": 700,
-  "text_align": 2,
-  "quote_text": "Be the change you want to see.",
-  "text_boxes": [
-    {
-      "id": "text-1",
-      "text": "Be the change",
-      "x_percent": 0.08,
-      "y_percent": 0.24,
-      "width_percent": 0.84,
-      "height_percent": 0.18
-    },
-    {
-      "id": "text-2",
-      "text": "you want to see.",
-      "x_percent": 0.08,
-      "y_percent": 0.42,
-      "width_percent": 0.84,
-      "height_percent": 0.18
-    }
-  ],
-  "text_x_percent": 0.08,
-  "text_y_percent": 0.24,
-  "confidence": 0.91,
-  "warnings": []
-}
-```
-
+The agent should output one strict template JSON object and, if needed, a separate human-readable review note. The JSON should remain stable enough to convert into the editor config without extra parsing rules.
