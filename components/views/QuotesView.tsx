@@ -92,6 +92,8 @@ const TEXT_BOX_HORIZONTAL_PADDING = 12;
 const TEXT_BOX_VERTICAL_PADDING = 10;
 const FONT_PREVIEW_WIDTH = 42;
 const FONT_PREVIEW_HEIGHT = 24;
+const FONT_CHIP_WIDTH = 108;
+const FONT_CHIP_SPACING = 10;
 const FONT_PREVIEW_CACHE = new Map<string, string>();
 
 const LoadingQuoteEditor = React.memo(function LoadingQuoteEditor() {
@@ -519,7 +521,9 @@ const InlineFeaturePanel = React.memo(function InlineFeaturePanel({
   onTextPositionXChange,
   onTextPositionYChange,
 }: InlineFeaturePanelProps) {
-  const { width: screenWidth } = useWindowDimensions();
+  const { width: screenWidth, height: screenHeight } = useWindowDimensions();
+  const fontStripRef = useRef<FlatList<(typeof fontOptions)[number]> | null>(null);
+  const fontStripFade = useRef(new Animated.Value(feature === 'FontFamily' ? 0 : 1)).current;
   const [draftColor, setDraftColor] = useState(feature === 'FontColor' ? fontColor : bgColor);
   const [draftOpacity, setDraftOpacity] = useState(imageOpacity);
   const [draftFontSize, setDraftFontSize] = useState(fontSize);
@@ -532,6 +536,19 @@ const InlineFeaturePanel = React.memo(function InlineFeaturePanel({
     Math.min(screenWidth - 32, screenWidth >= 768 ? 460 : screenWidth <= 390 ? 320 : 390),
   );
   const hueSliderHeight = Math.max(12, Math.min(18, Math.round(inlinePickerWidth * 0.045)));
+  const inlinePickerSurfaceHeight = Math.max(
+    64,
+    Math.round(inlinePickerHeight * (screenWidth >= 768 ? 0.84 : 0.8)),
+  );
+  const inlinePickerHueHeight = Math.max(
+    12,
+    Math.min(18, Math.round(screenWidth * (screenWidth >= 768 ? 0.022 : 0.028))),
+  );
+  const inlinePickerGap = Math.max(6, Math.round(screenHeight * (screenWidth >= 768 ? 0.006 : 0.008)));
+  const resolvedFontIndex = Math.max(
+    0,
+    fontOptions.findIndex((item) => item.family === resolvedTextFamily),
+  );
 
   useEffect(() => {
     setDraftColor(feature === 'FontColor' ? fontColor : bgColor);
@@ -542,6 +559,34 @@ const InlineFeaturePanel = React.memo(function InlineFeaturePanel({
     setDraftX(globalPositionX);
     setDraftY(globalPositionY);
   }, [feature]);
+
+  useEffect(() => {
+    if (feature !== 'FontFamily' || fontOptions.length === 0) {
+      fontStripFade.setValue(1);
+      return;
+    }
+
+    fontStripFade.setValue(0);
+
+    const animationFrame = requestAnimationFrame(() => {
+      fontStripRef.current?.scrollToIndex({
+        index: resolvedFontIndex,
+        animated: true,
+        viewPosition: 0.5,
+      });
+
+      Animated.timing(fontStripFade, {
+        toValue: 1,
+        duration: 260,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: true,
+      }).start();
+    });
+
+    return () => {
+      cancelAnimationFrame(animationFrame);
+    };
+  }, [feature, fontOptions, resolvedFontIndex, fontStripFade]);
 
   const commitAndClose = () => {
     onClose();
@@ -611,6 +656,7 @@ const InlineFeaturePanel = React.memo(function InlineFeaturePanel({
         <InlineFeatureShell onClose={commitAndClose}>
           <View style={[styles.colorPickerWrap, { width: inlinePickerWidth, alignSelf: 'center' }]}>
             <ColorPickerComponent
+              style={styles.colorPickerRoot}
               value={draftColor}
               sliderThickness={hueSliderHeight}
               thumbSize={14}
@@ -629,21 +675,27 @@ const InlineFeaturePanel = React.memo(function InlineFeaturePanel({
                 setDraftColor(color.hex);
                 }}
               >
-              <Panel1
-                style={[styles.colorPickerSurface, { height: inlinePickerHeight, borderRadius: 14 }]}
-                boundedThumb
-                thumbShape="circle"
-                thumbSize={14}
-                thumbColor={INLINE_EDITOR_YELLOW}
-              />
-              <HueSlider
-                style={[styles.colorPickerHueSlider, { width: inlinePickerWidth - 32, height: hueSliderHeight }]}
-                sliderThickness={hueSliderHeight}
-                thumbShape="circle"
-                thumbSize={14}
-                thumbColor={INLINE_EDITOR_YELLOW}
-                boundedThumb
-              />
+              <View style={styles.colorPickerStage}>
+                <View style={[styles.colorPickerSurfaceWrap, { height: inlinePickerSurfaceHeight }]}>
+                  <Panel1
+                    style={[styles.colorPickerSurface, { borderRadius: 14 }]}
+                    boundedThumb
+                    thumbShape="circle"
+                    thumbSize={14}
+                    thumbColor={INLINE_EDITOR_YELLOW}
+                  />
+                </View>
+                <View style={[styles.colorPickerHueWrap, { marginTop: inlinePickerGap }]}>
+                  <HueSlider
+                    style={[styles.colorPickerHueSlider, { height: inlinePickerHueHeight }]}
+                    sliderThickness={inlinePickerHueHeight}
+                    thumbShape="circle"
+                    thumbSize={14}
+                    thumbColor={INLINE_EDITOR_YELLOW}
+                    boundedThumb
+                  />
+                </View>
+              </View>
             </ColorPickerComponent>
           </View>
         </InlineFeatureShell>
@@ -697,21 +749,51 @@ const InlineFeaturePanel = React.memo(function InlineFeaturePanel({
     case 'FontFamily':
       return (
         <InlineFeatureShell onClose={commitAndClose}>
-          <ScrollView horizontal nestedScrollEnabled showsHorizontalScrollIndicator={false} contentContainerStyle={styles.fontStrip}>
-            {fontOptions.map((item) => (
-              <Pressable
-                key={item.family}
-                onPress={() => {
-                  onFontFamilyChange(item.family);
-                }}
-                style={[styles.fontChip, resolvedTextFamily === item.family && styles.fontChipActive]}
-              >
-                <View style={styles.fontChipPreviewWrap}>
-                  <FontPreviewSample family={item.family} provider={fontProvider} />
-                </View>
-              </Pressable>
-            ))}
-          </ScrollView>
+          <Animated.View style={{ opacity: fontStripFade }}>
+            <FlatList
+              ref={fontStripRef}
+              horizontal
+              nestedScrollEnabled
+              showsHorizontalScrollIndicator={false}
+              data={fontOptions}
+              keyExtractor={(item) => item.family}
+              contentContainerStyle={styles.fontStrip}
+              getItemLayout={(_, index) => ({
+                length: FONT_CHIP_WIDTH + FONT_CHIP_SPACING,
+                offset: (FONT_CHIP_WIDTH + FONT_CHIP_SPACING) * index,
+                index,
+              })}
+              onScrollToIndexFailed={(info) => {
+                const offset = (FONT_CHIP_WIDTH + FONT_CHIP_SPACING) * info.index;
+                fontStripRef.current?.scrollToOffset({ offset, animated: true });
+                setTimeout(() => {
+                  fontStripRef.current?.scrollToIndex({
+                    index: info.index,
+                    animated: true,
+                    viewPosition: 0.5,
+                  });
+                }, 50);
+              }}
+              renderItem={({ item }) => {
+                const isActive = resolvedTextFamily === item.family;
+                return (
+                  <Pressable
+                    onPress={() => {
+                      onFontFamilyChange(item.family);
+                    }}
+                    style={[
+                      styles.fontChip,
+                      isActive && styles.fontChipActive,
+                    ]}
+                  >
+                    <View style={styles.fontChipPreviewWrap}>
+                      <FontPreviewSample family={item.family} provider={fontProvider} />
+                    </View>
+                  </Pressable>
+                );
+              }}
+            />
+          </Animated.View>
         </InlineFeatureShell>
       );
     case 'CanvasSize':
@@ -954,6 +1036,7 @@ export default function QuotesView({
   const exportCanvasRef = useCanvasRef();
   const [selectedTextBoxId, setSelectedTextBoxId] = useState('');
   const selectedTextInputRef = useRef<TextInput>(null);
+  const lastTextBoxTapRef = useRef<{ boxId: string; timestamp: number } | null>(null);
   const initialSaveKeyRef = useRef<string | null>(null);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [globalQuoteText, setGlobalQuoteText] = useState(
@@ -1067,15 +1150,20 @@ export default function QuotesView({
   const scrollbarTrackWidth = Math.max(40, Math.floor((settingsTileWidth / 2) * 0.7));
   const scrollbarThumbSize = 8;
   const inlinePickerHeight = Math.max(
-    112,
-    Math.min(
-      Math.round(settingsPanelHeight - (isNarrowPhone ? 54 : 48)),
-      Math.round((screenWidth - horizontalInset * 2 - 20) * (isNarrowPhone ? 0.5 : 0.56)),
+    88,
+    Math.round(
+      Math.min(
+        settingsPanelHeight * (isTablet ? 0.68 : isNarrowPhone ? 0.58 : 0.64),
+        screenHeight * (isTablet ? 0.24 : isNarrowPhone ? 0.2 : 0.22),
+        (screenWidth - horizontalInset * 2 - 20) * (isTablet ? 0.42 : 0.46),
+      ),
     ),
   );
   const settingsContainerPaddingBottom = bottomInset + (isNarrowPhone ? 10 : 4);
-  const featurePanelHostPaddingBottom = bottomInset + 8;
   const templatesZonePaddingBottom = bottomInset + (isNarrowPhone ? 12 : 6);
+  const settingsContainerPaddingTop = currentFeature && currentFeature !== 'TextEdit' ? 0 : 4;
+  const settingsContainerPaddingBottomValue =
+    currentFeature && currentFeature !== 'TextEdit' ? 0 : settingsContainerPaddingBottom;
   const maxSettingsScroll = Math.max(0, settingsContentWidth - settingsViewportWidth);
   const scrollbarUsableWidth = Math.max(0, scrollbarTrackWidth - 6 - scrollbarThumbSize);
   const scrollbarThumbX =
@@ -1257,6 +1345,27 @@ export default function QuotesView({
 
   const focusTextBox = (boxId: string) => {
     setSelectedTextBoxId(boxId);
+  };
+
+  const openTextEditorForBox = (boxId: string) => {
+    setSelectedTextBoxId(boxId);
+    setCurrentFeature('TextEdit');
+    setModalVisible(true);
+  };
+
+  const handleCanvasTextTap = (boxId: string) => {
+    const now = Date.now();
+    const lastTap = lastTextBoxTapRef.current;
+
+    focusTextBox(boxId);
+
+    if (lastTap && lastTap.boxId === boxId && now - lastTap.timestamp < 300) {
+      lastTextBoxTapRef.current = null;
+      openTextEditorForBox(boxId);
+      return;
+    }
+
+    lastTextBoxTapRef.current = { boxId, timestamp: now };
   };
 
   const clearTextFocus = () => {
@@ -2155,7 +2264,7 @@ export default function QuotesView({
                 return (
                   <Pressable
                     key={box.id}
-                    onPress={() => focusTextBox(box.id)}
+                    onPress={() => handleCanvasTextTap(box.id)}
                     style={[
                       styles.textBoxOverlay,
                       {
@@ -2195,9 +2304,18 @@ export default function QuotesView({
           </Canvas>
         </View>
       </View>
-      <View style={[styles.settingsContainer, { height: settingsPanelHeight, paddingBottom: settingsContainerPaddingBottom }]}>
+      <View
+        style={[
+          styles.settingsContainer,
+          {
+            height: settingsPanelHeight,
+            paddingTop: settingsContainerPaddingTop,
+            paddingBottom: settingsContainerPaddingBottomValue,
+          },
+        ]}
+      >
           {currentFeature && currentFeature !== 'TextEdit' ? (
-            <View style={[styles.featurePanelHost, { height: settingsPanelHeight, paddingBottom: featurePanelHostPaddingBottom }]}>
+            <View style={styles.featurePanelHost}>
               {renderInlineFeatureContent()}
             </View>
           ) : (
@@ -2682,7 +2800,7 @@ const styles = StyleSheet.create({
   //   marginTop: 2,
   // },
   settingsContainer: {
-    // backgroundColor: 'green',
+    // backgroundColor: 'red',
     position: 'absolute',
     bottom: 0,
     left: 0,
@@ -2695,20 +2813,21 @@ const styles = StyleSheet.create({
     flexShrink: 0,
   },
   featurePanelHost: {
+    // backgroundColor:'green',
     flex: 1,
     overflow: 'hidden',
-    paddingHorizontal: 12,
-    paddingBottom: 4,
   },
   featurePanel: {
     flex: 1,
+    width: '100%',
+    height: '100%',
     borderTopLeftRadius: 0,
     borderTopRightRadius: 0,
     borderRadius: 0,
     backgroundColor: '#fff',
-    paddingHorizontal: 10,
-    paddingTop: 8,
-    paddingBottom: 6,
+    paddingHorizontal: 0,
+    paddingTop: 0,
+    paddingBottom: 0,
     overflow: 'hidden',
     shadowColor: 'transparent',
     shadowOpacity: 0,
@@ -2769,7 +2888,9 @@ const styles = StyleSheet.create({
   featurePanelBody: {
     flex: 1,
     minHeight: 0,
-    paddingBottom: 2,
+    paddingHorizontal: 10,
+    paddingTop: 8,
+    paddingBottom: 6,
     gap: 6,
   },
   featurePanelBodyContent: {
@@ -3021,21 +3142,39 @@ const styles = StyleSheet.create({
     backgroundColor: '#fff',
     paddingHorizontal: 8,
     paddingVertical: 6,
-    gap: 6,
     overflow: 'hidden',
     borderWidth: 1,
     borderColor: '#ececec',
   },
+  colorPickerRoot: {
+    flex: 1,
+    minHeight: 0,
+  },
+  colorPickerStage: {
+    flex: 1,
+    minHeight: 0,
+    alignItems: 'stretch',
+    justifyContent: 'space-between',
+  },
+  colorPickerSurfaceWrap: {
+    flexShrink: 0,
+    width: '100%',
+    overflow: 'hidden',
+  },
   colorPickerSurface: {
     width: '100%',
-    marginBottom: 10,
+    height: '100%',
     overflow: 'hidden',
+  },
+  colorPickerHueWrap: {
+    flexShrink: 0,
+    width: '100%',
   },
   colorPickerHueSlider: {
     width: '100%',
     height: 14,
     borderRadius: 14,
-    marginTop: 4,
+    overflow: 'hidden',
   },
   cropBackdrop: {
     flex: 1,

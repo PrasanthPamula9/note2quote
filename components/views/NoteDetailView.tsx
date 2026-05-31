@@ -14,7 +14,6 @@ import {
 import { Appbar, Menu, Portal } from 'react-native-paper';
 import MaterialIcons from '@react-native-vector-icons/material-design-icons';
 import { Note } from '../../types/notes';
-import SelectableNoteBodyView from '../native/SelectableNoteBodyView';
 import { getResponsiveMetrics } from '../utils/responsive';
 
 interface NoteDetailViewProps {
@@ -154,16 +153,15 @@ export default function NoteDetailView({
         ) : (
           <>
             <Text style={[styles.title, { fontSize: layout.titleSize }]}>{note.header}</Text>
-            <SelectableNoteBodyView
+            <Text
+              selectable
               style={[
-                styles.noteBodyNative,
+                styles.noteBody,
                 { minHeight: layout.isTablet ? 260 : 180 },
               ]}
-              text={note.body}
-              onCreateQuote={(event) => {
-                onCreateQuote?.(event.nativeEvent.text);
-              }}
-            />
+            >
+              {note.body}
+            </Text>
           </>
         )}
       </ScrollView>
@@ -290,11 +288,6 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: '#333',
     lineHeight: 24,
-  },
-  noteBodyNative: {
-    color: '#333',
-    lineHeight: 24,
-    marginTop: 2,
   },
   createQuoteButton: {
     marginHorizontal: 16,

@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { View, StyleSheet } from 'react-native';
+import { BackHandler, View, StyleSheet } from 'react-native';
 import Animated, {
   SlideInLeft,
   SlideInRight,
@@ -154,6 +154,24 @@ export default function QuotesContainer({
     setTransitionDirection('backward');
     setViewState('gallery');
   };
+
+  useEffect(() => {
+    const onHardwareBackPress = () => {
+      if (viewState === 'editor') {
+        handleBack();
+        return true;
+      }
+
+      return false;
+    };
+
+    const subscription = BackHandler.addEventListener(
+      'hardwareBackPress',
+      onHardwareBackPress,
+    );
+
+    return () => subscription.remove();
+  }, [viewState, handleBack]);
 
   return (
     <View style={styles.container}>

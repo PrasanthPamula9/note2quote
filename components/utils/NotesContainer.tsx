@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { StyleSheet, View } from 'react-native';
+import React, { useEffect, useState } from 'react';
+import { BackHandler, StyleSheet, View } from 'react-native';
 import Animated, {
   SlideInLeft,
   SlideInRight,
@@ -59,6 +59,24 @@ export default function NotesContainer({ onCreateQuote }: NotesContainerProps) {
     setViewState('list');
     setSelectedNote(null);
   };
+
+  useEffect(() => {
+    const onHardwareBackPress = () => {
+      if (viewState === 'detail') {
+        handleBack();
+        return true;
+      }
+
+      return false;
+    };
+
+    const subscription = BackHandler.addEventListener(
+      'hardwareBackPress',
+      onHardwareBackPress,
+    );
+
+    return () => subscription.remove();
+  }, [viewState, handleBack]);
 
   return (
     <View style={styles.container}>

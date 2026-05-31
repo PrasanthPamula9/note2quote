@@ -1,5 +1,6 @@
 package com.note2quote
 
+import android.graphics.Color
 import android.view.ActionMode
 import android.view.Menu
 import android.view.MenuItem
@@ -22,6 +23,9 @@ class SelectableNoteBodyView(private val reactContext: ReactContext) :
     isFocusable = true
     isFocusableInTouchMode = true
     setTextIsSelectable(true)
+    // React Native styles do not reliably control text color on this native view,
+    // so we set an explicit body color that matches the rest of the app.
+    setTextColor(Color.parseColor("#333333"))
     customSelectionActionModeCallback = object : ActionMode.Callback {
       override fun onCreateActionMode(mode: ActionMode, menu: Menu): Boolean {
         menu.add(0, MENU_ID_CREATE_QUOTE, 100, "Create quote")
