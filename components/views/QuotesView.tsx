@@ -1,12 +1,13 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { View, Text, StyleSheet, useWindowDimensions, Modal, FlatList, Pressable, ScrollView, Alert, TextInput, Platform, PermissionsAndroid, Image, ImageBackground, ActivityIndicator, Animated, Easing } from 'react-native';
-import { Canvas, Rect, Path, Image as SkiaImage, Group, Picture, useImage, Paragraph, Skia, TextAlign, FontWeight, FontSlant, useCanvasRef, ImageFormat, StrokeCap, fitbox } from '@shopify/react-native-skia';
+import { Canvas, Rect, Path, Image as SkiaImage, Group, Picture, useImage, Paragraph, Skia, TextAlign, FontWeight, FontSlant, useCanvasRef, ImageFormat, fitbox } from '@shopify/react-native-skia';
 import { Appbar, Icon } from 'react-native-paper'
 import {launchImageLibrary, launchCamera} from 'react-native-image-picker';
 import Slider from '@react-native-community/slider';
 import MaterialIcons from '@react-native-vector-icons/material-design-icons';
 import ColorPickerComponent, { HueSlider, Panel1 } from 'reanimated-color-picker';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import QuoteExportView from './QuoteExportView';
 import { QuoteEditorConfig, CanvasPresetKey, QuoteTemplate, QuoteTextBox } from '../../types/quotes';
 import { DEFAULT_FONT_FAMILY, QUOTE_FONT_CATALOG, type FontCatalogEntry } from '../../utils/fontCatalog';
 import { BUNDLED_FONT_FAMILIES, type BundledFontFamily } from '../../utils/bundledFonts';
@@ -325,7 +326,9 @@ const InlineFeatureShell = React.memo(function InlineFeatureShell({
           </Pressable>
         </View>
       </View>
-      <View style={styles.featurePanelBody}>{children}</View>
+      <View style={styles.featurePanelBody}>
+        <View style={styles.featurePanelBodyContent}>{children}</View>
+      </View>
     </View>
   );
 });
@@ -1846,20 +1849,6 @@ export default function QuotesView({
     </>
   );
 
-  const renderProgressPath = (progress: number) => {
-    const size = 112;
-    const strokeWidth = 10;
-    const path = Skia.Path.Make();
-    path.addOval({
-      x: strokeWidth / 2,
-      y: strokeWidth / 2,
-      width: size - strokeWidth,
-      height: size - strokeWidth,
-    });
-
-    return { path, size, strokeWidth, progress };
-  };
-
   const getRNFS = () => require('react-native-fs') as typeof import('react-native-fs');
 
   const getExportDirectories = async () => {
@@ -2398,118 +2387,26 @@ export default function QuotesView({
       >
         {renderTextEditorModalContent()}
       </Modal>
-      <Modal
+      <QuoteExportView
         visible={exportModalVisible}
-        animationType="fade"
-        transparent={true}
-        onRequestClose={() => {
+        exportFormat={exportFormat}
+        exportMenuVisible={exportMenuVisible}
+        exporting={exporting}
+        exportProgress={exportProgress}
+        exportStatus={exportStatus}
+        onClose={() => {
           if (!exporting) {
             setExportModalVisible(false);
             setExportMenuVisible(false);
           }
         }}
-      >
-        <View style={styles.exportBackdrop}>
-          <Pressable
-            style={StyleSheet.absoluteFill}
-            onPress={() => {
-              if (!exporting) {
-                setExportModalVisible(false);
-                setExportMenuVisible(false);
-              }
-            }}
-          />
-          <View style={styles.exportSheet}>
-            <Text style={styles.modalTitle}>Export Quote</Text>
-            <Text style={styles.exportDescription}>
-              Choose the format, then export the current quote with all saved settings.
-            </Text>
-
-            <View style={styles.exportField}>
-              <Text style={styles.exportFieldLabel}>File type</Text>
-              <Pressable
-                style={styles.exportDropdown}
-                onPress={() => {
-                  if (!exporting) {
-                    setExportMenuVisible((current) => !current);
-                  }
-                }}
-              >
-                <Text style={styles.exportDropdownText}>{exportFormats[exportFormat].label}</Text>
-                <Icon source={exportMenuVisible ? 'chevron-up' : 'chevron-down'} size={20} />
-              </Pressable>
-              {exportMenuVisible ? (
-                <View style={styles.exportMenu}>
-                  {(['png', 'jpeg', 'jpg'] as ExportFormat[]).map((format) => (
-                    <Pressable
-                      key={format}
-                      style={[styles.exportMenuItem, exportFormat === format && styles.exportMenuItemActive]}
-                      onPress={() => {
-                        setExportFormat(format);
-                        setExportMenuVisible(false);
-                      }}
-                    >
-                      <Text style={styles.exportMenuItemText}>{exportFormats[format].label}</Text>
-                      {exportFormat === format ? <Icon source="check" size={18} color="#1a73e8" /> : null}
-                    </Pressable>
-                  ))}
-                </View>
-              ) : null}
-            </View>
-
-            <View style={styles.exportProgressWrap}>
-              {(() => {
-                const progressConfig = renderProgressPath(exportProgress);
-                return (
-                  <>
-                    <Canvas style={{ width: progressConfig.size, height: progressConfig.size }}>
-                      <Path
-                        path={progressConfig.path}
-                        start={0}
-                        end={1}
-                        stroke={{ width: progressConfig.strokeWidth, cap: StrokeCap.Round }}
-                        color="rgba(26, 115, 232, 0.15)"
-                      />
-                      <Path
-                        path={progressConfig.path}
-                        start={0}
-                        end={Math.max(0, Math.min(1, progressConfig.progress / 100))}
-                        stroke={{ width: progressConfig.strokeWidth, cap: StrokeCap.Round }}
-                        color="#1a73e8"
-                      />
-                    </Canvas>
-                    <View style={styles.exportProgressCenter}>
-                      <Text style={styles.exportProgressText}>{Math.round(exportProgress)}%</Text>
-                    </View>
-                  </>
-                );
-              })()}
-            </View>
-
-            <Text style={styles.exportStatusText}>{exportStatus}</Text>
-
-            <View style={styles.exportActions}>
-              <Pressable
-                style={[styles.exportActionButton, styles.exportCancelButton, exporting && styles.exportActionDisabled]}
-                disabled={exporting}
-                onPress={() => {
-                  setExportModalVisible(false);
-                  setExportMenuVisible(false);
-                }}
-              >
-                <Text style={styles.exportCancelText}>Close</Text>
-              </Pressable>
-              <Pressable
-                style={[styles.exportActionButton, styles.exportPrimaryButton, exporting && styles.exportActionDisabled]}
-                disabled={exporting}
-                onPress={handleExport}
-              >
-                <Text style={styles.exportPrimaryText}>{exporting ? 'Exporting...' : 'Export'}</Text>
-              </Pressable>
-            </View>
-          </View>
-        </View>
-      </Modal>
+        onToggleMenu={() => setExportMenuVisible((current) => !current)}
+        onSelectFormat={(format) => {
+          setExportFormat(format);
+          setExportMenuVisible(false);
+        }}
+        onExport={handleExport}
+      />
       <Modal
         visible={templatesModalVisible}
         animationType="slide"
@@ -2896,6 +2793,8 @@ const styles = StyleSheet.create({
   featurePanelBodyContent: {
     flexGrow: 1,
     minHeight: 0,
+    alignItems: 'stretch',
+    justifyContent: 'center',
     gap: 6,
   },
   featureSection: {

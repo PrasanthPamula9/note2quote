@@ -51,6 +51,7 @@ export default function NotesContainer({ onCreateQuote }: NotesContainerProps) {
   const handleSaveNote = async (updatedNote: Note) => {
     const savedNote = await updateNote(updatedNote);
     setSelectedNote(savedNote);
+    return savedNote;
   };
 
   const handleDeleteNote = async (noteId: string) => {

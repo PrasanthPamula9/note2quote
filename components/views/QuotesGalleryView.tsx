@@ -2,16 +2,24 @@ import React from 'react';
 import {
   FlatList,
   ImageBackground,
+  Keyboard,
   Pressable,
   StyleSheet,
   Text,
+  TextInput,
   View,
+  LayoutAnimation,
+  Platform,
+  UIManager,
   useWindowDimensions,
 } from 'react-native';
+import { Appbar } from 'react-native-paper';
 import MaterialIcons from '@react-native-vector-icons/material-design-icons';
 import { Quote } from '../../types/quotes';
 import { normalizeQuoteEditorConfig } from '../../utils/quoteConfig';
 import { getResponsiveMetrics } from '../utils/responsive';
+import NativeAdTile from '../ads/NativeAdTile';
+import { htmlToPlainText } from '../../utils/noteContent';
 
 type QuotesGalleryViewProps = {
   quotes: Quote[];
@@ -20,6 +28,8 @@ type QuotesGalleryViewProps = {
 };
 
 type GalleryItem = (Quote & { kind: 'quote' }) | { id: string; kind: 'add' };
+type GalleryAdItem = { id: string; kind: 'ad' };
+type GalleryListItem = GalleryItem | GalleryAdItem;
 
 const formatDate = (timestamp: number) =>
   new Date(timestamp).toLocaleDateString('en-US', {
@@ -34,25 +44,107 @@ export default function QuotesGalleryView({
 }: QuotesGalleryViewProps) {
   const { width, height } = useWindowDimensions();
   const layout = getResponsiveMetrics(width, height);
+  const searchInputRef = React.useRef<TextInput | null>(null);
+  const [searchActive, setSearchActive] = React.useState(false);
+  const [searchText, setSearchText] = React.useState('');
 
-  const data: GalleryItem[] = [
+  React.useEffect(() => {
+    if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
+      UIManager.setLayoutAnimationEnabledExperimental(true);
+    }
+  }, []);
+
+  React.useEffect(() => {
+    if (!searchActive) {
+      return;
+    }
+
+    const handle = requestAnimationFrame(() => {
+      searchInputRef.current?.focus();
+    });
+
+    return () => cancelAnimationFrame(handle);
+  }, [searchActive]);
+
+  const handleToggleSearch = () => {
+    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+    if (searchActive) {
+      Keyboard.dismiss();
+      setSearchActive(false);
+      setSearchText('');
+      return;
+    }
+
+    setSearchActive(true);
+  };
+
+  const normalizedSearch = searchText.trim().toLowerCase();
+  const filteredQuotes = React.useMemo(() => {
+    if (!normalizedSearch) {
+      return quotes;
+    }
+
+    return quotes.filter((quote) => {
+      const config = normalizeQuoteEditorConfig(quote.editor_config);
+      const previewText = (config.quote_text || quote.quote_text || '').toLowerCase();
+      const bodyText = htmlToPlainText(config.quote_text || quote.quote_text || '').toLowerCase();
+      return (
+        previewText.includes(normalizedSearch) ||
+        bodyText.includes(normalizedSearch)
+      );
+    });
+  }, [normalizedSearch, quotes]);
+
+  const data: GalleryListItem[] = [
     { id: 'add-quote', kind: 'add' },
-    ...quotes.map((quote) => ({ ...quote, kind: 'quote' as const })),
+    { id: 'quotes-native-ad', kind: 'ad' },
+    ...filteredQuotes.map((quote) => ({ ...quote, kind: 'quote' as const })),
   ];
 
   return (
     <View style={styles.container}>
-      <View style={styles.header}>
-        <Text style={[styles.title, { fontSize: layout.titleSize }]}>Quotes</Text>
-        <Text style={[styles.subtitle, { fontSize: layout.subtitleSize }]}>
-          Tap a card to edit or use the plus tile to start a new quote.
-        </Text>
-      </View>
+      <Appbar.Header style={styles.header}>
+        <View style={styles.headerRow}>
+          {searchActive ? (
+            <View style={styles.searchShell}>
+              <TextInput
+                ref={searchInputRef}
+                style={[styles.searchInput, { fontSize: layout.bodySize }]}
+                placeholder="Search quotes"
+                placeholderTextColor="#999"
+                value={searchText}
+                onChangeText={setSearchText}
+                autoCapitalize="none"
+                autoCorrect={false}
+                returnKeyType="search"
+                clearButtonMode="while-editing"
+                selectionColor="#433e3e"
+              />
+            </View>
+          ) : (
+            <View style={styles.titleBlock}>
+              <Text style={[styles.title, { fontSize: layout.titleSize }]}>Quotes</Text>
+            </View>
+          )}
+          <Appbar.Action
+            icon={searchActive ? 'close' : 'magnify'}
+            onPress={handleToggleSearch}
+          />
+        </View>
+      </Appbar.Header>
 
       <FlatList
         data={data}
         numColumns={layout.listColumns}
         keyExtractor={(item) => item.id}
+        ListHeaderComponent={
+          searchActive && normalizedSearch && filteredQuotes.length === 0 ? (
+            <View style={styles.searchEmptyState}>
+              <Text style={styles.emptyStateTitle}>No quotes found</Text>
+              <Text style={styles.emptyStateText}>Try a different search term.</Text>
+            </View>
+          ) : null
+        }
         contentContainerStyle={[
           styles.listContent,
           {
@@ -96,6 +188,21 @@ export default function QuotesGalleryView({
             );
           }
 
+          if (item.kind === 'ad') {
+            return (
+              <NativeAdTile
+                variant="grid"
+                style={[
+                  styles.adTile,
+                  {
+                    borderRadius: layout.cardRadius,
+                    marginBottom: layout.cardGap,
+                  },
+                ]}
+              />
+            );
+          }
+
           return (
             <Pressable
               style={[
@@ -116,8 +223,14 @@ export default function QuotesGalleryView({
         }}
         ListEmptyComponent={
           <View style={styles.emptyState}>
-            <Text style={styles.emptyStateTitle}>No quotes yet</Text>
-            <Text style={styles.emptyStateText}>Create your first quote with the plus tile.</Text>
+            <Text style={styles.emptyStateTitle}>
+              {normalizedSearch ? 'No quotes found' : 'No quotes yet'}
+            </Text>
+            <Text style={styles.emptyStateText}>
+              {normalizedSearch
+                ? 'Try a different search term.'
+                : 'Create your first quote with the plus tile.'}
+            </Text>
           </View>
         }
       />
@@ -169,22 +282,49 @@ const styles = StyleSheet.create({
     backgroundColor: '#fefefe',
   },
   header: {
-    paddingHorizontal: 20,
-    paddingTop: 24,
-    paddingBottom: 12,
+    backgroundColor: 'transparent',
+    elevation: 0,
+    paddingHorizontal: 8,
+  },
+  headerRow: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  titleBlock: {
+    flex: 1,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
   },
   title: {
     fontWeight: '800',
     color: '#433e3e',
-    marginTop: 30,
   },
   subtitle: {
     marginTop: 6,
     lineHeight: 20,
     color: '#5f5f5f',
   },
+  searchShell: {
+    flex: 1,
+    marginLeft: 12,
+    marginVertical: 8,
+    backgroundColor: '#f4f4f4',
+    borderRadius: 18,
+    paddingHorizontal: 14,
+    justifyContent: 'center',
+  },
+  searchInput: {
+    color: '#222',
+    paddingVertical: 8,
+  },
   listContent: {
     marginTop: 8,
+  },
+  searchEmptyState: {
+    paddingHorizontal: 24,
+    paddingVertical: 28,
+    alignItems: 'center',
   },
   columnWrapper: {
     justifyContent: 'space-between',
@@ -198,6 +338,9 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 6 },
     elevation: 2,
     overflow: 'hidden',
+  },
+  adTile: {
+    flex: 1,
   },
   quoteTile: {
     flex: 1,

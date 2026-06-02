@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { AppState, DeviceEventEmitter, NativeModules, Pressable, StyleSheet, Text, View } from 'react-native';
 import MaterialIcons from '@react-native-vector-icons/material-design-icons';
 import {
   NavigationContainer,
@@ -28,6 +28,10 @@ const TAB_ICONS: Record<keyof RootTabParamList, { focused: string; unfocused: st
 const TAB_LABELS: Record<keyof RootTabParamList, string> = {
   Notes: 'Notes',
   Quotes: 'Quotes',
+};
+
+type ProcessTextModuleType = {
+  consumePendingText?: () => Promise<string | null>;
 };
 
 function CustomTabBar({ state, navigation }: BottomTabBarProps) {
@@ -86,12 +90,15 @@ function CustomTabBar({ state, navigation }: BottomTabBarProps) {
 
 const MainView = () => {
   const navigationRef = useNavigationContainerRef<RootTabParamList>();
+  const processTextModule = NativeModules.ProcessTextModule as ProcessTextModuleType | undefined;
+  const consumingProcessTextRef = React.useRef(false);
+  const lastHandledProcessTextRef = React.useRef<{ text: string; at: number }>({ text: '', at: 0 });
   const [draftQuoteRequest, setDraftQuoteRequest] = React.useState<{
     id: number;
     text: string;
   } | null>(null);
 
-  const handleCreateQuoteFromNote = (quoteText: string) => {
+  const handleCreateQuoteFromNote = React.useCallback((quoteText: string) => {
     const text = quoteText.trim();
     if (!text) {
       return;
@@ -102,11 +109,77 @@ const MainView = () => {
       text,
     });
     navigationRef.navigate('Quotes');
-  };
+  }, [navigationRef]);
+
+  const handleIncomingProcessText = React.useCallback((text: string) => {
+    const normalizedText = text.trim();
+    if (!normalizedText) {
+      return;
+    }
+
+    const now = Date.now();
+    const lastHandled = lastHandledProcessTextRef.current;
+    if (lastHandled.text === normalizedText && now - lastHandled.at < 3000) {
+      return;
+    }
+
+    lastHandledProcessTextRef.current = { text: normalizedText, at: now };
+    handleCreateQuoteFromNote(normalizedText);
+  }, [handleCreateQuoteFromNote]);
 
   const handleDraftConsumed = () => {
     setDraftQuoteRequest(null);
   };
+
+  React.useEffect(() => {
+    let isMounted = true;
+
+    const consumePendingProcessText = async () => {
+      if (consumingProcessTextRef.current) {
+        return;
+      }
+
+      consumingProcessTextRef.current = true;
+
+      try {
+        const pendingText = await processTextModule?.consumePendingText?.();
+        if (!isMounted || !pendingText?.trim()) {
+          return;
+        }
+
+        handleIncomingProcessText(pendingText);
+      } finally {
+        consumingProcessTextRef.current = false;
+      }
+    };
+
+    void consumePendingProcessText();
+
+    const processTextSubscription = DeviceEventEmitter.addListener(
+      'processTextReceived',
+      (event: { text?: string }) => {
+        const nextText = event?.text?.trim();
+        if (!nextText) {
+          return;
+        }
+
+        handleIncomingProcessText(nextText);
+        void processTextModule?.consumePendingText?.();
+      },
+    );
+
+    const subscription = AppState.addEventListener('change', (state) => {
+      if (state === 'active') {
+        void consumePendingProcessText();
+      }
+    });
+
+    return () => {
+      isMounted = false;
+      processTextSubscription.remove();
+      subscription.remove();
+    };
+  }, [handleCreateQuoteFromNote, handleIncomingProcessText, processTextModule]);
 
   return (
     <NavigationContainer ref={navigationRef}>
