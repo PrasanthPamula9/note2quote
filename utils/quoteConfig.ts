@@ -79,6 +79,17 @@ export const CANVAS_SIZE_OPTIONS: CanvasSizeOption[] = [
   { key: 'instagram_story', label: 'Story' },
 ];
 
+export const CANVAS_PRESET_ASPECT_RATIOS: Record<CanvasPresetKey, number> = {
+  instagram_post_square: 1,
+  instagram_post_portrait: 1080 / 1350,
+  instagram_post_landscape: 1080 / 566,
+  instagram_story: 1080 / 1920,
+};
+
+export function getCanvasPresetAspectRatio(canvasKey: CanvasPresetKey) {
+  return CANVAS_PRESET_ASPECT_RATIOS[canvasKey] ?? 1;
+}
+
 const COLOR_TEMPLATE_SPECS: ColorTemplateSpec[] = [
   {
     template_name: 'Sunset Bold',

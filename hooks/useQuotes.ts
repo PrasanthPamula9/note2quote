@@ -13,6 +13,7 @@ import {
 } from '../database/quotesDb';
 
 type QuoteDraft = {
+  id?: string;
   quote_text: string;
   background_image_uri?: string | null;
   quote_category_id?: string;
@@ -54,6 +55,7 @@ export default function useQuotesStore() {
 
   const createQuote = async (quote: QuoteDraft) => {
     const savedQuote = (await createQuoteInDb({
+      id: quote.id,
       quote_text: quote.quote_text,
       background_image_uri: quote.background_image_uri ?? null,
       quote_category_id: quote.quote_category_id ?? DEFAULT_QUOTE_CATEGORY_ID,

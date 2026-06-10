@@ -206,6 +206,8 @@ export default function NativeAdTile({ variant = 'feed', style }: NativeAdTilePr
 const styles = StyleSheet.create({
   card: {
     borderWidth: 1,
+    width: '100%',
+    maxWidth: '100%',
     // borderColor: '#e6e8ee',
     // backgroundColor: '#fff',
     overflow: 'hidden',
@@ -216,11 +218,15 @@ const styles = StyleSheet.create({
     padding: 14,
   },
   gridCard: {
+    width: '100%',
+    maxWidth: '100%',
     aspectRatio: 1,
     borderRadius: 18,
     padding: 12,
   },
   squareCard: {
+    width: '100%',
+    maxWidth: '100%',
     aspectRatio: 1,
     borderRadius: 24,
     padding: 16,

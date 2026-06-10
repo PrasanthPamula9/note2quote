@@ -26,8 +26,61 @@ const INITIAL_QUOTE_CATEGORIES = [
 
 let dbPromise = null;
 
+function getRNFS() {
+  return require('react-native-fs');
+}
+
+function generateQuoteId() {
+  return `quote-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
+}
+
+function getQuotePreviewFilePath(quoteId) {
+  const RNFS = getRNFS();
+  return `${RNFS.DocumentDirectoryPath}/notetoquote/quote-previews/${quoteId}.jpg`;
+}
+
+/**
+ * @param {string} quoteId
+ * @param {string | number | null} [cacheBust]
+ */
+function getQuotePreviewImageUri(quoteId, cacheBust = null) {
+  const uri = `file://${getQuotePreviewFilePath(quoteId)}`;
+  if (cacheBust == null) {
+    return uri;
+  }
+
+  return `${uri}?v=${encodeURIComponent(String(cacheBust))}`;
+}
+
+async function saveQuotePreviewImage(quoteId, previewBase64) {
+  const trimmedPreview = String(previewBase64 || '').trim();
+  if (!trimmedPreview) {
+    return null;
+  }
+
+  const RNFS = getRNFS();
+  const directory = `${RNFS.DocumentDirectoryPath}/notetoquote/quote-previews`;
+  const filePath = getQuotePreviewFilePath(quoteId);
+  await RNFS.mkdir(directory);
+  await RNFS.writeFile(filePath, trimmedPreview, 'base64');
+  return getQuotePreviewImageUri(quoteId);
+}
+
+async function deleteQuotePreviewImage(quoteId) {
+  try {
+    const RNFS = getRNFS();
+    const filePath = getQuotePreviewFilePath(quoteId);
+    if (await RNFS.exists(filePath)) {
+      await RNFS.unlink(filePath);
+    }
+  } catch (error) {
+    // Preview cleanup is best-effort.
+  }
+}
+
 /**
  * @typedef {{
+ *   id?: string,
  *   quote_text: string,
  *   background_image_uri?: string | null,
  *   quote_category_id?: string,
@@ -43,10 +96,6 @@ let dbPromise = null;
  *   photos: unknown[],
  * }} UnsplashCacheInput
  */
-
-function generateQuoteId() {
-  return `quote-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
-}
 
 function mapRow(row) {
   const editorConfig = parseEditorConfig(row.editor_config_json);
@@ -255,6 +304,7 @@ async function seedQuoteCategories(db) {
  */
 async function createQuote(input) {
   const {
+    id = generateQuoteId(),
     quote_text,
     background_image_uri = null,
     quote_category_id = DEFAULT_QUOTE_CATEGORY_ID,
@@ -270,7 +320,7 @@ async function createQuote(input) {
     quote_text: quote_text.trim(),
   };
   const quote = {
-    id: generateQuoteId(),
+    id,
     quote_text: resolvedConfig.quote_text,
     background_image_uri,
     quote_category_id,
@@ -338,6 +388,7 @@ async function updateQuote(quote) {
 async function deleteQuote(id) {
   const db = await getDatabase();
   await db.executeSql('DELETE FROM quotes WHERE id = ?;', [id]);
+  await deleteQuotePreviewImage(id);
 }
 
 async function createQuoteCategory({ name }) {
@@ -502,6 +553,10 @@ module.exports = {
   getDatabase,
   getUserProfile,
   saveUserProfile,
+  generateQuoteId,
+  getQuotePreviewImageUri,
+  saveQuotePreviewImage,
+  deleteQuotePreviewImage,
   getCachedUnsplashSearch,
   saveUnsplashSearchCache,
   getQuotes,

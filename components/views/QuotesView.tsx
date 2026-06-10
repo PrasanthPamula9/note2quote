@@ -45,6 +45,10 @@ type CanvasPreset = {
 
 type ExportFormat = 'png' | 'jpeg' | 'jpg';
 
+type QuoteSavePayload = QuoteEditorConfig & {
+  preview_image_base64?: string | null;
+};
+
 type PendingCropImage = {
   uri: string;
   width: number;
@@ -1025,7 +1029,7 @@ type QuotesViewProps = {
   initialBackgroundImageUri?: string | null;
   initialEditorConfig?: QuoteEditorConfig | null;
   onBack?: () => void;
-  onSave?: (quote: QuoteEditorConfig) => void | Promise<void>;
+  onSave?: (quote: QuoteSavePayload) => void | Promise<void>;
   onDelete?: () => void | Promise<void>;
 };
 
@@ -1114,6 +1118,7 @@ export default function QuotesView({
     ),
   );
   const exportCanvasRef = useCanvasRef();
+  const previewCanvasRef = useCanvasRef();
   const [selectedTextBoxId, setSelectedTextBoxId] = useState('');
   const selectedTextInputRef = useRef<TextInput>(null);
   const lastTextBoxTapRef = useRef<{ boxId: string; timestamp: number } | null>(null);
@@ -1131,6 +1136,7 @@ export default function QuotesView({
   );
   const fontProvider = useBundledFontProvider();
   const insets = useSafeAreaInsets();
+  const previewSnapshotScale = 0.4;
   const availableFontSet = useMemo(
     () => new Set<BundledFontFamily>(fontProvider ? BUNDLED_FONT_FAMILIES : []),
     [fontProvider],
@@ -1229,6 +1235,8 @@ export default function QuotesView({
     maxDisplayWidth / nativeCanvasWidth,
     maxDisplayHeight / nativeCanvasHeight,
   );
+  const previewSnapshotWidth = Math.max(1, Math.round(nativeCanvasWidth * previewSnapshotScale));
+  const previewSnapshotHeight = Math.max(1, Math.round(nativeCanvasHeight * previewSnapshotScale));
 
   const canvasWidth = nativeCanvasWidth * previewScale;
   const canvasHeight = nativeCanvasHeight * previewScale;
@@ -1750,6 +1758,24 @@ export default function QuotesView({
 
   const isFontsReady = Boolean(fontProvider);
 
+  const capturePreviewBase64 = React.useCallback(async () => {
+    if (!isFontsReady) {
+      return null;
+    }
+
+    try {
+      const snapshot = await previewCanvasRef.current?.makeImageSnapshotAsync();
+      if (!snapshot) {
+        return null;
+      }
+
+      return snapshot.encodeToBase64(ImageFormat.JPEG, 85);
+    } catch (error) {
+      console.warn('Could not capture preview thumbnail', error);
+      return null;
+    }
+  }, [isFontsReady, previewCanvasRef]);
+
   const autosavePayload = useMemo(
     () => ({
       activeCanvasKey,
@@ -1822,7 +1848,11 @@ export default function QuotesView({
     setSaveStatus('saving');
     saveTimerRef.current = setTimeout(async () => {
       try {
-        await onSave(autosavePayload);
+        const preview_image_base64 = await capturePreviewBase64();
+        await onSave({
+          ...autosavePayload,
+          preview_image_base64,
+        });
         initialSaveKeyRef.current = autosavePayloadKey;
         setSaveStatus('saved');
       } catch (error) {
@@ -1837,7 +1867,7 @@ export default function QuotesView({
         saveTimerRef.current = null;
       }
     };
-  }, [autosavePayload, autosavePayloadKey, onSave]);
+  }, [autosavePayload, autosavePayloadKey, capturePreviewBase64, onSave]);
 
   const cropTargetCanvasKey = pendingCanvasKey ?? activeCanvasKey;
   const cropTargetPreset = CANVAS_PRESETS[cropTargetCanvasKey];
@@ -2475,6 +2505,21 @@ export default function QuotesView({
               }}
             >
               {renderCanvasContent(layoutTextBoxMetrics, nativeCanvasWidth, nativeCanvasHeight)}
+            </Canvas>
+            <Canvas
+              ref={previewCanvasRef}
+              pointerEvents="none"
+              style={{
+                position: 'absolute',
+                left: -20000,
+                top: -20000,
+                width: previewSnapshotWidth,
+                height: previewSnapshotHeight,
+              }}
+            >
+              <Group transform={[{ scaleX: previewSnapshotScale }, { scaleY: previewSnapshotScale }]}>
+                {renderCanvasContent(layoutTextBoxMetrics, nativeCanvasWidth, nativeCanvasHeight)}
+              </Group>
             </Canvas>
           </View>
         </View>

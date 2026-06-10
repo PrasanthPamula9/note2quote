@@ -11,8 +11,13 @@ import QuotesGalleryView from '../views/QuotesGalleryView';
 import QuotesView from '../views/QuotesView';
 import { Quote } from '../../types/quotes';
 import useQuotesStore from '../../hooks/useQuotes';
-import { DEFAULT_QUOTE_CATEGORY_ID } from '../../database/quotesDb';
-import { getUserProfile, saveUserProfile } from '../../database/quotesDb';
+import {
+  DEFAULT_QUOTE_CATEGORY_ID,
+  generateQuoteId,
+  saveQuotePreviewImage,
+  getUserProfile,
+  saveUserProfile,
+} from '../../database/quotesDb';
 import {
   DEFAULT_QUOTE_TEXT,
   DEFAULT_AUTHOR_TEXT,
@@ -49,6 +54,7 @@ export default function QuotesContainer({
   const [selectedQuote, setSelectedQuote] = useState<Quote | null>(null);
   const [editorSessionKey, setEditorSessionKey] = useState<string>('new-quote');
   const [draftEditorConfig, setDraftEditorConfig] = useState<Quote['editor_config'] | null>(null);
+  const [draftQuoteText, setDraftQuoteText] = useState<string>('');
   const [activeCategoryId, setActiveCategoryId] = useState('all');
   const [selectionMode, setSelectionMode] = useState(false);
   const [selectedQuoteIds, setSelectedQuoteIds] = useState<string[]>([]);
@@ -176,6 +182,7 @@ export default function QuotesContainer({
     }
 
     setSelectedQuote(quote);
+    setDraftQuoteText('');
     setEditorSessionKey(quote.id);
     setTransitionDirection('forward');
     setViewState('editor');
@@ -184,6 +191,7 @@ export default function QuotesContainer({
   const handleBack = React.useCallback(() => {
     setSelectedQuote(null);
     setDraftEditorConfig(null);
+    setDraftQuoteText('');
     setTransitionDirection('backward');
     setViewState('gallery');
     clearSelection();
@@ -191,6 +199,7 @@ export default function QuotesContainer({
 
   const handleAddQuote = () => {
     setSelectedQuote(null);
+    setDraftQuoteText(DEFAULT_QUOTE_TEXT);
     setDraftEditorConfig(getRandomColorQuoteEditorConfig(DEFAULT_QUOTE_TEXT, resolveDefaultAuthorName(userProfile)));
     setEditorSessionKey(`new-${Date.now()}`);
     setTransitionDirection('forward');
@@ -230,18 +239,10 @@ export default function QuotesContainer({
     const openDraftQuote = async () => {
       const authorName = resolveDefaultAuthorName(userProfile);
       const editorConfigWithAuthor = getRandomColorQuoteEditorConfig(draftText, authorName);
-      const resolvedCategoryId = activeCategoryId === 'all'
-        ? DEFAULT_QUOTE_CATEGORY_ID
-        : activeCategoryId;
-      const savedQuote = await createQuote({
-        quote_text: draftText,
-        background_image_uri: null,
-        quote_category_id: resolvedCategoryId,
-        editor_config: editorConfigWithAuthor,
-      });
-      setSelectedQuote(savedQuote);
-      setDraftEditorConfig(null);
-      setEditorSessionKey(savedQuote.id);
+      setSelectedQuote(null);
+      setDraftEditorConfig(editorConfigWithAuthor);
+      setDraftQuoteText(draftText);
+      setEditorSessionKey(`draft-${draftQuoteRequest.id}`);
       setTransitionDirection('forward');
       setViewState('editor');
       onDraftConsumed?.();
@@ -272,7 +273,9 @@ export default function QuotesContainer({
     }
   }, [activeCategoryId, clearSelection, quoteCategories]);
 
-  const handleSaveQuote = async (config: Quote['editor_config']) => {
+  const handleSaveQuote = async (
+    config: Quote['editor_config'] & { preview_image_base64?: string | null },
+  ) => {
     const {
       activeCanvasKey,
       background_image_uri,
@@ -291,6 +294,7 @@ export default function QuotesContainer({
       text_boxes,
       text_x_percent,
       text_y_percent,
+      preview_image_base64,
     } = config;
     const trimmedText = quote_text.trim();
     const resolvedQuoteText = trimmedText || selectedQuote?.quote_text || '';
@@ -298,6 +302,15 @@ export default function QuotesContainer({
       selectedQuote?.quote_category_id ||
       (activeCategoryId === 'all' ? DEFAULT_QUOTE_CATEGORY_ID : activeCategoryId);
     const resolvedPinned = selectedQuote?.pinned ?? 0;
+    const quoteId = selectedQuote?.id ?? generateQuoteId();
+
+    if (preview_image_base64) {
+      try {
+        await saveQuotePreviewImage(quoteId, preview_image_base64);
+      } catch (error) {
+        console.warn('Preview thumbnail generation failed', error);
+      }
+    }
 
     const editorConfig: Quote['editor_config'] = {
       activeCanvasKey,
@@ -322,6 +335,7 @@ export default function QuotesContainer({
     if (selectedQuote) {
       const savedQuote = await updateQuote({
         ...selectedQuote,
+        id: quoteId,
         quote_text: resolvedQuoteText,
         background_image_uri,
         quote_category_id: resolvedCategoryId,
@@ -332,8 +346,10 @@ export default function QuotesContainer({
         ...selectedQuote,
         ...savedQuote,
       });
+      setDraftQuoteText('');
     } else {
       const savedQuote = await createQuote({
+        id: quoteId,
         quote_text: resolvedQuoteText,
         background_image_uri,
         quote_category_id: resolvedCategoryId,
@@ -342,6 +358,7 @@ export default function QuotesContainer({
       });
       setSelectedQuote(savedQuote);
       setDraftEditorConfig(null);
+      setDraftQuoteText('');
     }
   };
 
@@ -460,7 +477,7 @@ export default function QuotesContainer({
           >
             <QuotesView
               title={selectedQuote ? 'Edit Quote' : 'New Quote'}
-              initialQuoteText={selectedQuote?.quote_text ?? ''}
+              initialQuoteText={selectedQuote?.quote_text ?? draftQuoteText ?? ''}
               initialBackgroundImageUri={selectedQuote?.background_image_uri ?? null}
               initialEditorConfig={selectedQuote?.editor_config ?? draftEditorConfig}
               onBack={handleBack}

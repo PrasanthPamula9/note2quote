@@ -1,7 +1,6 @@
 import React from 'react';
 import {
   Alert,
-  FlatList,
   ImageBackground,
   Keyboard,
   LayoutAnimation,
@@ -19,7 +18,11 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import MaterialIcons from '@react-native-vector-icons/material-design-icons';
 import { Quote, QuoteCategory, type UserProfile } from '../../types/quotes';
-import { normalizeQuoteEditorConfig } from '../../utils/quoteConfig';
+import {
+  getCanvasPresetAspectRatio,
+  normalizeQuoteEditorConfig,
+} from '../../utils/quoteConfig';
+import { getQuotePreviewImageUri } from '../../database/quotesDb';
 import { getResponsiveMetrics } from '../utils/responsive';
 import NativeAdTile from '../ads/NativeAdTile';
 import { htmlToPlainText } from '../../utils/noteContent';
@@ -46,9 +49,8 @@ type QuotesGalleryViewProps = {
   onUserProfileSave?: (profile: UserProfile) => Promise<void> | void;
 };
 
-type GalleryItem = (Quote & { kind: 'quote' }) | { id: string; kind: 'add' };
-type GalleryAdItem = { id: string; kind: 'ad' };
-type GalleryListItem = GalleryItem | GalleryAdItem;
+type GalleryItem = (Quote & { kind: 'quote' }) | { id: string; kind: 'add' } | { id: string; kind: 'ad' };
+type GalleryListItem = GalleryItem;
 
 const formatDate = (timestamp: number) =>
   new Date(timestamp).toLocaleDateString('en-US', {
@@ -85,6 +87,7 @@ export default function QuotesGalleryView({
   const [searchText, setSearchText] = React.useState('');
   const [settingsVisible, setSettingsVisible] = React.useState(false);
   const [draftProfile, setDraftProfile] = React.useState<UserProfile>(userProfile);
+  const [masonryWidth, setMasonryWidth] = React.useState(0);
 
   React.useEffect(() => {
     if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
@@ -166,16 +169,71 @@ export default function QuotesGalleryView({
     });
   }, [normalizedSearch, quotes]);
 
-  const listData: GalleryListItem[] = [
-    { id: 'add-quote', kind: 'add' },
-    { id: 'quotes-native-ad', kind: 'ad' },
-    ...filteredQuotes.map((quote) => ({ ...quote, kind: 'quote' as const })),
-  ];
-  const selectionExtraData = React.useMemo(
-    () => `${selectionMode ? '1' : '0'}|${selectedQuoteIds.join(',')}|${activeCategoryId}|${normalizedSearch}`,
-    [activeCategoryId, normalizedSearch, selectedQuoteIds, selectionMode],
+  const addTileAspectRatio = React.useMemo(
+    () => 1,
+    [],
   );
-  const listKey = `quotes-list-${refreshKey}-cols-${layout.listColumns}`;
+  const adTileAspectRatio = React.useMemo(
+    () => getCanvasPresetAspectRatio('instagram_post_portrait'),
+    [],
+  );
+  const listData: GalleryListItem[] = React.useMemo(
+    () => [
+      { id: 'add-quote', kind: 'add' },
+      { id: 'quotes-native-ad', kind: 'ad' },
+      ...filteredQuotes.map((quote) => ({ ...quote, kind: 'quote' as const })),
+    ],
+    [filteredQuotes],
+  );
+  const masonryLayout = React.useMemo(() => {
+    const columnCount = Math.max(1, layout.listColumns);
+    const gap = layout.cardGap;
+    const availableWidth = Math.max(
+      0,
+      masonryWidth > 0 ? masonryWidth : layout.contentMaxWidth,
+    );
+    const usableWidth = Math.max(1, availableWidth - gap * (columnCount - 1));
+    const baseColumnWidth = Math.max(1, Math.floor(usableWidth / columnCount));
+    const remainder = Math.max(0, usableWidth - baseColumnWidth * columnCount);
+    const columnWidths = Array.from({ length: columnCount }, (_, index) =>
+      baseColumnWidth + (index < remainder ? 1 : 0),
+    );
+
+    const columns = Array.from({ length: columnCount }, () => ({
+      height: 0,
+      items: [] as Array<{ item: GalleryListItem; aspectRatio: number }>,
+    }));
+
+    const pickShortestColumn = () => {
+      let shortestIndex = 0;
+      for (let i = 1; i < columns.length; i += 1) {
+        if (columns[i].height < columns[shortestIndex].height) {
+          shortestIndex = i;
+        }
+      }
+      return shortestIndex;
+    };
+
+    const estimateHeight = (aspectRatio: number) => {
+      return Math.max(1, baseColumnWidth / Math.max(0.5, aspectRatio));
+    };
+
+    for (const item of listData) {
+      const aspectRatio =
+        item.kind === 'quote'
+          ? getCanvasPresetAspectRatio(normalizeQuoteEditorConfig(item.editor_config).activeCanvasKey)
+          : 1;
+      const targetColumn = pickShortestColumn();
+      columns[targetColumn].items.push({ item, aspectRatio });
+      columns[targetColumn].height += estimateHeight(aspectRatio) + gap;
+    }
+
+    return {
+      columnCount,
+      columnWidths,
+      columns,
+    };
+  }, [layout.cardGap, layout.contentMaxWidth, layout.listColumns, listData, masonryWidth]);
 
   const selectedCount = selectedQuoteIds.length;
   const allSelected = selectionMode && selectedCount > 0 && selectedCount === filteredQuotes.length;
@@ -245,7 +303,8 @@ export default function QuotesGalleryView({
         >
           <Pressable
             style={styles.categoryAddButton}
-            onPress={onNewCategorySelected}
+            onPress={onAddQuote}
+            onLongPress={onNewCategorySelected}
             hitSlop={8}
           >
             <MaterialIcons name="plus" size={18} color="#433e3e" />
@@ -293,24 +352,9 @@ export default function QuotesGalleryView({
         </ScrollView>
       </View>
 
-      <FlatList
-        key={listKey}
-        data={listData}
-        numColumns={layout.listColumns}
-        keyExtractor={(item) => item.id}
-        extraData={`${quotes.map((quote) => `${quote.id}:${quote.pinned}:${quote.updated_at}`).join('|')}|${selectionExtraData}`}
-        ListHeaderComponent={
-          selectionMode && selectedCount > 0 ? (
-            <View style={styles.selectionSummary}>
-              <Text style={styles.selectionSummaryText}>{selectedCount} selected</Text>
-            </View>
-          ) : searchActive && normalizedSearch && filteredQuotes.length === 0 ? (
-            <View style={styles.searchEmptyState}>
-              <Text style={styles.emptyStateTitle}>No quotes found</Text>
-              <Text style={styles.emptyStateText}>Try a different search term.</Text>
-            </View>
-          ) : null
-        }
+      <ScrollView
+        key={`quotes-gallery-${refreshKey}-${layout.listColumns}`}
+        showsVerticalScrollIndicator={false}
         contentContainerStyle={[
           styles.listContent,
           {
@@ -321,92 +365,122 @@ export default function QuotesGalleryView({
             paddingBottom: selectionMode ? layout.sectionPadding + 96 : layout.sectionPadding + 110,
           },
         ]}
-        columnWrapperStyle={[styles.columnWrapper, { gap: layout.cardGap }]}
-        showsVerticalScrollIndicator={false}
-        renderItem={({ item }) => {
-          if (item.kind === 'add') {
-            return (
-              <Pressable
-                style={[
-                  styles.addCard,
-                  {
-                    borderRadius: layout.cardRadius,
-                    marginBottom: layout.cardGap,
-                  },
-                ]}
-                onPress={onAddQuote}
-              >
-                <View style={styles.addContent}>
-                  <View
-                    style={[
-                      styles.addIconCircle,
-                      {
-                        width: layout.isTablet ? 84 : 72,
-                        height: layout.isTablet ? 84 : 72,
-                        borderRadius: layout.isTablet ? 42 : 36,
-                      },
-                    ]}
-                  >
-                    <MaterialIcons name="plus" size={layout.isTablet ? 40 : 36} color="#433e3e" />
-                  </View>
-                  <Text style={[styles.addLabel, { fontSize: layout.bodySize }]}>New Quote</Text>
-                </View>
-              </Pressable>
-            );
-          }
+      >
+        {selectionMode && selectedCount > 0 ? (
+          <View style={styles.selectionSummary}>
+            <Text style={styles.selectionSummaryText}>{selectedCount} selected</Text>
+          </View>
+        ) : searchActive && normalizedSearch && filteredQuotes.length === 0 ? (
+          <View style={styles.searchEmptyState}>
+            <Text style={styles.emptyStateTitle}>No quotes found</Text>
+            <Text style={styles.emptyStateText}>Try a different search term.</Text>
+          </View>
+        ) : null}
 
-          if (item.kind === 'ad') {
-            return (
-              <NativeAdTile
-                variant="grid"
-                style={[
-                  styles.adTile,
-                  {
-                    borderRadius: layout.cardRadius,
-                    marginBottom: layout.cardGap,
-                  },
-                ]}
-              />
-            );
-          }
-
-          return (
-            <Pressable
+        <View
+          style={[
+            styles.masonryGrid,
+            {
+              gap: layout.cardGap,
+            },
+          ]}
+          onLayout={(event) => {
+            const nextWidth = Math.round(event.nativeEvent.layout.width);
+            setMasonryWidth((current) => (current === nextWidth ? current : nextWidth));
+          }}
+        >
+          {masonryLayout.columns.map((column, columnIndex) => (
+            <View
+              key={`masonry-column-${columnIndex}`}
               style={[
-                styles.card,
-                selectionMode && styles.cardSelectable,
-                selectedQuoteIds.includes(item.id) && styles.cardSelected,
+                styles.masonryColumn,
                 {
-                  borderRadius: layout.cardRadius,
-                  marginBottom: layout.cardGap,
+                  width: masonryLayout.columnWidths[columnIndex],
+                  gap: layout.cardGap,
                 },
               ]}
-              onPress={() => onQuotePress(item)}
-              onLongPress={() => onQuoteLongPress?.(item)}
             >
-              <QuoteGalleryPreview
-                quote={item}
-                cardRadius={layout.cardRadius}
-                categoryLabel={categoryLabelMap.get(item.quote_category_id) || 'All quotes'}
-                selected={selectedQuoteIds.includes(item.id)}
-                selectionMode={selectionMode}
-              />
-            </Pressable>
-          );
-        }}
-        ListEmptyComponent={
-          <View style={styles.emptyState}>
-            <Text style={styles.emptyStateTitle}>
-              {normalizedSearch ? 'No quotes found' : 'No quotes yet'}
-            </Text>
-            <Text style={styles.emptyStateText}>
-              {normalizedSearch
-                ? 'Try a different search term.'
-                : 'Create your first quote with the plus tile.'}
-            </Text>
-          </View>
-        }
-      />
+              {column.items.map(({ item, aspectRatio }) => {
+                if (item.kind === 'add') {
+                  return (
+                    <Pressable
+                      key={item.id}
+                      style={[
+                        styles.addCard,
+                        {
+                          borderRadius: layout.cardRadius,
+                          aspectRatio: addTileAspectRatio,
+                        },
+                      ]}
+                      onPress={onAddQuote}
+                    >
+                      <View style={styles.addContent}>
+                        <View
+                          style={[
+                            styles.addIconCircle,
+                            {
+                              width: layout.isTablet ? 64 : 56,
+                              height: layout.isTablet ? 64 : 56,
+                              borderRadius: layout.isTablet ? 32 : 28,
+                            },
+                          ]}
+                        >
+                          <MaterialIcons name="plus" size={layout.isTablet ? 30 : 26} color="#433e3e" />
+                        </View>
+                        <Text style={[styles.addLabel, { fontSize: layout.bodySize }]}>New Quote</Text>
+                      </View>
+                    </Pressable>
+                  );
+                }
+
+                if (item.kind === 'ad') {
+                  return (
+                    <View
+                      key={item.id}
+                      style={[
+                        styles.adTile,
+                        {
+                          borderRadius: layout.cardRadius,
+                          aspectRatio: adTileAspectRatio,
+                          overflow: 'hidden',
+                        },
+                      ]}
+                    >
+                      <NativeAdTile variant="square" style={styles.adTileContent} />
+                    </View>
+                  );
+                }
+
+                return (
+                  <Pressable
+                    key={item.id}
+                    style={[
+                      styles.card,
+                      selectionMode && styles.cardSelectable,
+                      selectedQuoteIds.includes(item.id) && styles.cardSelected,
+                      {
+                        borderRadius: layout.cardRadius,
+                        aspectRatio,
+                      },
+                    ]}
+                    onPress={() => onQuotePress(item)}
+                    onLongPress={() => onQuoteLongPress?.(item)}
+                  >
+                    <QuoteGalleryPreview
+                      quote={item}
+                      cardRadius={layout.cardRadius}
+                      categoryLabel={categoryLabelMap.get(item.quote_category_id) || 'All quotes'}
+                      selected={selectedQuoteIds.includes(item.id)}
+                      selectionMode={selectionMode}
+                      previewAspectRatio={aspectRatio}
+                    />
+                  </Pressable>
+                );
+              })}
+            </View>
+          ))}
+        </View>
+      </ScrollView>
 
       {selectionMode ? (
         <View style={styles.selectionBar}>
@@ -501,30 +575,75 @@ function QuoteGalleryPreview({
   categoryLabel,
   selected,
   selectionMode,
+  previewAspectRatio,
 }: {
   quote: Quote;
   cardRadius: number;
   categoryLabel: string;
   selected: boolean;
   selectionMode: boolean;
+  previewAspectRatio: number;
 }) {
   const config = normalizeQuoteEditorConfig(quote.editor_config);
-  const backgroundSource = config.background_image_uri ? { uri: config.background_image_uri } : null;
+  const previewImageUri = getQuotePreviewImageUri(quote.id, quote.updated_at);
+  const backgroundImageUri = quote.background_image_uri || config.background_image_uri;
+  const backgroundSource = backgroundImageUri ? { uri: backgroundImageUri } : null;
   const previewText = config.quote_text?.trim() || quote.quote_text || 'Quote';
   const showPinned = Boolean(quote.pinned);
   const previewTextColor = getReadableTextColor(config.bg_color, config.font_color);
   const previewBackgroundColor = config.bg_color || '#000000';
+  const [previewFailed, setPreviewFailed] = React.useState(false);
+  const showSnapshot = Boolean(previewImageUri) && !previewFailed;
 
   return (
-    <View style={[styles.quoteTile, { backgroundColor: previewBackgroundColor, borderRadius: cardRadius }]}>
-      {backgroundSource ? (
+    <View
+      style={[
+        styles.quoteTile,
+        {
+          backgroundColor: previewBackgroundColor,
+          borderRadius: cardRadius,
+          aspectRatio: previewAspectRatio,
+        },
+      ]}
+    >
+      {showSnapshot ? (
         <ImageBackground
-          source={backgroundSource}
-          style={styles.heroImage}
-          imageStyle={[styles.heroImageMask, { opacity: config.image_opacity }]}
+          source={{ uri: previewImageUri }}
+          style={styles.previewImage}
+          imageStyle={[styles.previewImageMask, { borderRadius: cardRadius }]}
+          resizeMode="cover"
+          onError={() => setPreviewFailed(true)}
         />
-      ) : null}
-      <View style={[styles.heroOverlay, { backgroundColor: previewBackgroundColor, opacity: backgroundSource ? 0.12 : 0.04 }]} />
+      ) : (
+        <>
+          {backgroundSource ? (
+            <ImageBackground
+              source={backgroundSource}
+              style={styles.heroImage}
+              imageStyle={[styles.heroImageMask, { opacity: config.image_opacity }]}
+            />
+          ) : null}
+          <View
+            style={[
+              styles.heroOverlay,
+              { backgroundColor: previewBackgroundColor, opacity: backgroundSource ? 0.12 : 0.04 },
+            ]}
+          />
+          <View style={styles.quoteBody}>
+            <Text style={[styles.quoteMark, { color: previewTextColor }]}>{"\""}</Text>
+            <Text
+              style={[
+                styles.quoteText,
+                { color: previewTextColor },
+              ]}
+              numberOfLines={4}
+            >
+              {previewText}
+            </Text>
+            <Text style={[styles.dateText, { color: previewTextColor }]}>{formatDate(quote.updated_at)}</Text>
+          </View>
+        </>
+      )}
 
       <View style={styles.quoteBadgeRow}>
         {showPinned ? (
@@ -532,10 +651,6 @@ function QuoteGalleryPreview({
             <MaterialIcons name="pin" size={14} color="#222" />
           </View>
         ) : null}
-        <View style={styles.quoteBadge}>
-          <MaterialIcons name="folder-outline" size={14} color="#222" />
-          <Text style={styles.quoteBadgeText}>{categoryLabel}</Text>
-        </View>
       </View>
 
       {selectionMode ? (
@@ -547,20 +662,6 @@ function QuoteGalleryPreview({
           />
         </View>
       ) : null}
-
-      <View style={styles.quoteBody}>
-        <Text style={[styles.quoteMark, { color: previewTextColor }]}>{"\""}</Text>
-        <Text
-          style={[
-            styles.quoteText,
-            { color: previewTextColor },
-          ]}
-          numberOfLines={4}
-        >
-          {previewText}
-        </Text>
-        <Text style={[styles.dateText, { color: previewTextColor }]}>{formatDate(quote.updated_at)}</Text>
-      </View>
     </View>
   );
 }
@@ -792,6 +893,15 @@ const styles = StyleSheet.create({
   listContent: {
     marginTop: 8,
   },
+  masonryGrid: {
+    width: '100%',
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'center',
+  },
+  masonryColumn: {
+    flexShrink: 0,
+  },
   selectionSummary: {
     paddingHorizontal: 24,
     paddingTop: 6,
@@ -807,12 +917,8 @@ const styles = StyleSheet.create({
     paddingVertical: 28,
     alignItems: 'center',
   },
-  columnWrapper: {
-    justifyContent: 'space-between',
-  },
   card: {
-    flex: 1,
-    aspectRatio: 1,
+    width: '100%',
     shadowColor: '#000',
     shadowOpacity: 0.08,
     shadowRadius: 10,
@@ -829,11 +935,20 @@ const styles = StyleSheet.create({
     // backgroundColor: '#ffc107',
   },
   adTile: {
+    width: '100%',
+  },
+  adTileContent: {
     flex: 1,
   },
   quoteTile: {
-    flex: 1,
+    width: '100%',
     overflow: 'hidden',
+  },
+  previewImage: {
+    ...StyleSheet.absoluteFillObject,
+  },
+  previewImageMask: {
+    resizeMode: 'cover',
   },
   heroImage: {
     position: 'absolute',
@@ -909,7 +1024,7 @@ const styles = StyleSheet.create({
     opacity: 0.7,
   },
   addCard: {
-    flex: 1,
+    width: '100%',
     aspectRatio: 1,
     borderWidth: 1.5,
     borderColor: '#fff',
