@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { AppState, DeviceEventEmitter, NativeModules, Pressable, StyleSheet, Text, View } from 'react-native';
+import { AppState, DeviceEventEmitter, ImageBackground, NativeModules, Pressable, StyleSheet, Text, View } from 'react-native';
 import MaterialIcons from '@react-native-vector-icons/material-design-icons';
 import {
   NavigationContainer,
@@ -182,24 +182,31 @@ const MainView = () => {
   }, [handleCreateQuoteFromNote, handleIncomingProcessText, processTextModule]);
 
   return (
-    <NavigationContainer ref={navigationRef}>
-      <Tab.Navigator
-        tabBar={(props) => <CustomTabBar {...props} />}
-        screenOptions={{ headerShown: false }}
-      >
-        <Tab.Screen name="Notes">
-          {() => <NotesContainer onCreateQuote={handleCreateQuoteFromNote} />}
-        </Tab.Screen>
-        <Tab.Screen name="Quotes">
-          {() => (
-            <QuotesContainer
-              draftQuoteRequest={draftQuoteRequest}
-              onDraftConsumed={handleDraftConsumed}
-            />
-          )}
-        </Tab.Screen>
-      </Tab.Navigator>
-    </NavigationContainer>
+    <ImageBackground
+      source={require('../../assets/app_bg.png')}
+      resizeMode="cover"
+      imageStyle={styles.backgroundImage}
+      style={styles.shell}
+    >
+      <NavigationContainer ref={navigationRef}>
+        <Tab.Navigator
+          tabBar={(props) => <CustomTabBar {...props} />}
+          screenOptions={{ headerShown: false }}
+        >
+          <Tab.Screen name="Notes">
+            {() => <NotesContainer onCreateQuote={handleCreateQuoteFromNote} />}
+          </Tab.Screen>
+          <Tab.Screen name="Quotes">
+            {() => (
+              <QuotesContainer
+                draftQuoteRequest={draftQuoteRequest}
+                onDraftConsumed={handleDraftConsumed}
+              />
+            )}
+          </Tab.Screen>
+        </Tab.Navigator>
+      </NavigationContainer>
+    </ImageBackground>
   );
 };
 
@@ -208,11 +215,23 @@ export default MainView;
 const styles = StyleSheet.create({
   tabBar: {
     flexDirection: 'row',
-    backgroundColor: '#fff',
+    backgroundColor: 'transparent',
     borderTopWidth: 1,
-    borderTopColor: '#e0e0e0',
+    borderTopColor: 'rgba(224, 224, 224, 0.7)',
     paddingTop: 8,
     paddingHorizontal: 10,
+    elevation: 0,
+    shadowOpacity: 0,
+    shadowColor: 'transparent',
+    shadowOffset: { width: 0, height: 0 },
+    shadowRadius: 0,
+  },
+  backgroundImage: {
+    opacity: 0.28,
+  },
+  shell: {
+    flex: 1,
+    backgroundColor: 'transparent',
   },
   tabItem: {
     flex: 1,

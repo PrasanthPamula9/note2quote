@@ -97,7 +97,18 @@ export interface Quote {
   id: string;
   quote_text: string;
   background_image_uri: string | null;
+  quote_category_id: string;
+  pinned: number;
   editor_config: QuoteEditorConfig;
   created_at: number;
   updated_at: number;
+}
+
+export interface QuoteCategory {
+  id: string;
+  name: string;
+  is_default: number;
+  created_at: number;
+  updated_at: number;
+  quote_count?: number;
 }

@@ -140,7 +140,7 @@ const LoadingQuoteEditor = React.memo(function LoadingQuoteEditor() {
   return (
     <View style={styles.loadingScreen}>
       <View style={styles.loadingCard}>
-        <ActivityIndicator size="large" color="#1a73e8" />
+        <ActivityIndicator size="large" color="#ffc107" />
         <Animated.View style={[styles.loadingDot, dotStyle]} />
         <Text style={styles.loadingTitle}>Preparing quote editor</Text>
         <Text style={styles.loadingSubtitle}>Loading bundled fonts and previews...</Text>
@@ -370,20 +370,26 @@ const ImageCropModal = React.memo(function ImageCropModal({
     return null;
   }
 
-  const previewMaxWidth = Math.min(screenWidth - 32, 420);
-  const previewMaxHeight = Math.min(screenHeight * 0.42, 420);
-  let previewWidth = previewMaxWidth;
-  let previewHeight = previewWidth / aspectRatio;
-
-  if (previewHeight > previewMaxHeight) {
-    previewHeight = previewMaxHeight;
-    previewWidth = previewHeight * aspectRatio;
-  }
-
-  const cropRect = resolveCropRect(image.width, image.height, aspectRatio, zoom, offsetX, offsetY, rotation);
-  const previewScale = Math.max(1, zoom);
-  const previewTranslateX = -(offsetX - 0.5) * previewWidth * (previewScale - 1) * 2;
-  const previewTranslateY = -(offsetY - 0.5) * previewHeight * (previewScale - 1) * 2;
+  const previewWidth = Math.min(screenWidth - 32, 420);
+  const previewHeight = Math.min(screenHeight * 0.42, 420);
+  const rotatedImageWidth = rotation === 90 || rotation === 270 ? image.height : image.width;
+  const rotatedImageHeight = rotation === 90 || rotation === 270 ? image.width : image.height;
+  const baseImageScale = Math.min(previewWidth / rotatedImageWidth, previewHeight / rotatedImageHeight);
+  const imageDisplayWidth = rotatedImageWidth * baseImageScale * zoom;
+  const imageDisplayHeight = rotatedImageHeight * baseImageScale * zoom;
+  const imageDisplayLeft = (previewWidth - imageDisplayWidth) / 2;
+  const imageDisplayTop = (previewHeight - imageDisplayHeight) / 2;
+  const rotatedAspectRatio = rotatedImageWidth / rotatedImageHeight;
+  const cropBoxWidth =
+    rotatedAspectRatio > aspectRatio ? rotatedImageHeight * baseImageScale * aspectRatio : rotatedImageWidth * baseImageScale;
+  const cropBoxHeight =
+    rotatedAspectRatio > aspectRatio ? rotatedImageHeight * baseImageScale : rotatedImageWidth * baseImageScale / aspectRatio;
+  const cropBoxLeft = (previewWidth - cropBoxWidth) / 2;
+  const cropBoxTop = (previewHeight - cropBoxHeight) / 2;
+  const maxTranslateX = Math.max(0, (imageDisplayWidth - cropBoxWidth) / 2);
+  const maxTranslateY = Math.max(0, (imageDisplayHeight - cropBoxHeight) / 2);
+  const previewTranslateX = (0.5 - offsetX) * maxTranslateX * 2;
+  const previewTranslateY = (0.5 - offsetY) * maxTranslateY * 2;
 
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onCancel}>
@@ -404,19 +410,72 @@ const ImageCropModal = React.memo(function ImageCropModal({
             <ImageBackground
               source={{ uri: image.uri }}
               style={[
-                StyleSheet.absoluteFillObject,
+                {
+                  position: 'absolute',
+                  left: imageDisplayLeft,
+                  top: imageDisplayTop,
+                  width: imageDisplayWidth,
+                  height: imageDisplayHeight,
+                },
                 {
                   transform: [
                     { translateX: previewTranslateX },
                     { translateY: previewTranslateY },
-                    { scale: previewScale },
                     { rotate: `${rotation}deg` },
                   ],
                 },
               ]}
               imageStyle={styles.cropPreviewFallbackImage}
             />
-            <View style={styles.cropPreviewBorder} pointerEvents="none" />
+            <View style={[styles.cropPreviewMask, { top: 0, left: 0, right: 0, height: cropBoxTop }]} pointerEvents="none" />
+            <View
+              style={[
+                styles.cropPreviewMask,
+                {
+                  top: cropBoxTop,
+                  left: 0,
+                  width: cropBoxLeft,
+                  height: cropBoxHeight,
+                },
+              ]}
+              pointerEvents="none"
+            />
+            <View
+              style={[
+                styles.cropPreviewMask,
+                {
+                  top: cropBoxTop,
+                  right: 0,
+                  width: cropBoxLeft,
+                  height: cropBoxHeight,
+                },
+              ]}
+              pointerEvents="none"
+            />
+            <View
+              style={[
+                styles.cropPreviewMask,
+                {
+                  left: 0,
+                  right: 0,
+                  bottom: 0,
+                  height: cropBoxTop,
+                },
+              ]}
+              pointerEvents="none"
+            />
+            <View
+              style={[
+                styles.cropPreviewBorder,
+                {
+                  left: cropBoxLeft,
+                  top: cropBoxTop,
+                  width: cropBoxWidth,
+                  height: cropBoxHeight,
+                },
+              ]}
+              pointerEvents="none"
+            />
           </View>
 
           <View style={styles.cropControlGroup}>
@@ -1001,6 +1060,7 @@ export default function QuotesView({
   const [templatesModalVisible, setTemplatesModalVisible] = useState(false);
   const [cropModalVisible, setCropModalVisible] = useState(false);
   const [pendingCropImage, setPendingCropImage] = useState<PendingCropImage | null>(null);
+  const [pendingCanvasKey, setPendingCanvasKey] = useState<CanvasPresetKey | null>(null);
   const [cropZoom, setCropZoom] = useState(1);
   const [cropOffsetX, setCropOffsetX] = useState(0.5);
   const [cropOffsetY, setCropOffsetY] = useState(0.5);
@@ -1101,6 +1161,11 @@ export default function QuotesView({
 
   useEffect(() => {
     if (currentFeature !== 'TextEdit') {
+      return;
+    }
+
+    if (!selectedTextBoxId) {
+      selectedTextInputRef.current?.blur();
       return;
     }
 
@@ -1324,6 +1389,7 @@ export default function QuotesView({
     () => textBoxes.find((box) => box.id === selectedTextBoxId) ?? null,
     [selectedTextBoxId, textBoxes],
   );
+  const isAllTextMode = !selectedTextBox;
 
   const quoteText = useMemo(
     () => textBoxes.map((box) => box.text.trim()).filter(Boolean).join('\n'),
@@ -1748,7 +1814,17 @@ export default function QuotesView({
     };
   }, [autosavePayload, autosavePayloadKey, onSave]);
 
-  const currentCanvasAspectRatio = nativeCanvasWidth / nativeCanvasHeight;
+  const cropTargetCanvasKey = pendingCanvasKey ?? activeCanvasKey;
+  const cropTargetPreset = CANVAS_PRESETS[cropTargetCanvasKey];
+  const cropModalAspectRatio = cropTargetPreset.aspectRatio;
+
+  const closeCropModal = () => {
+    setCropModalVisible(false);
+    setPendingCropImage(null);
+    setPendingCanvasKey(null);
+    setCropRotation(0);
+    setCroppingImage(false);
+  };
 
   const openImageCropEditor = async (image: PendingCropImage) => {
     let resolvedImage = image;
@@ -1782,6 +1858,28 @@ export default function QuotesView({
     setCropModalVisible(true);
   };
 
+  const handleCanvasSizeChange = (nextCanvasKey: CanvasPresetKey) => {
+    if (nextCanvasKey === activeCanvasKey) {
+      return;
+    }
+
+    if (!backgroundImageUri) {
+      setActiveCanvasKey(nextCanvasKey);
+      return;
+    }
+
+    setPendingCanvasKey(nextCanvasKey);
+    openImageCropEditor({
+      uri: backgroundImageUri,
+      width: 0,
+      height: 0,
+      label: 'Background image',
+    }).catch((error) => {
+      console.warn('Could not reopen crop editor for canvas resize', error);
+      setPendingCanvasKey(null);
+    });
+  };
+
   const handleConfirmCrop = () => {
     if (!pendingCropImage || croppingImage) {
       return;
@@ -1798,17 +1896,19 @@ export default function QuotesView({
       const crop = resolveCropRect(
         sourceWidth,
         sourceHeight,
-        currentCanvasAspectRatio,
+        cropModalAspectRatio,
         cropZoom,
         cropOffsetX,
         cropOffsetY,
         cropRotation,
       );
 
+      if (pendingCanvasKey) {
+        setActiveCanvasKey(pendingCanvasKey);
+      }
       setBackgroundImageUri(pendingCropImage.uri);
       setBackgroundImageCrop(crop);
-      setCropModalVisible(false);
-      setPendingCropImage(null);
+      closeCropModal();
     } catch (error) {
       console.warn('Crop failed', error);
       Alert.alert('Crop failed', 'We could not crop the selected image. Please try again.');
@@ -2031,7 +2131,7 @@ export default function QuotesView({
         resolvedTextWeight={resolvedTextWeight}
         onBackgroundImageChange={setBackgroundImageUri}
         onBgColorChange={setBgColor}
-        onCanvasKeyChange={setActiveCanvasKey}
+        onCanvasKeyChange={handleCanvasSizeChange}
         onClose={closeFeaturePanel}
         onFontColorChange={setTextColor}
         onFontFamilyChange={setTextFamily}
@@ -2051,7 +2151,7 @@ export default function QuotesView({
     <ImageCropModal
       visible={cropModalVisible}
       image={pendingCropImage}
-      aspectRatio={currentCanvasAspectRatio}
+      aspectRatio={cropModalAspectRatio}
       zoom={cropZoom}
       offsetX={cropOffsetX}
       offsetY={cropOffsetY}
@@ -2062,12 +2162,7 @@ export default function QuotesView({
       onRotate={() => {
         setCropRotation((current) => getNextCropRotation(current));
       }}
-      onCancel={() => {
-        setCropModalVisible(false);
-        setPendingCropImage(null);
-        setCropRotation(0);
-        setCroppingImage(false);
-      }}
+      onCancel={closeCropModal}
       onConfirm={handleConfirmCrop}
       saving={croppingImage}
     />
@@ -2082,7 +2177,7 @@ export default function QuotesView({
             <Text style={styles.featurePanelTitle}>Edit Text Boxes</Text>
           </View>
           <Pressable onPress={closeFeaturePanel} hitSlop={10} style={styles.featureDoneButton}>
-            <MaterialIcons name="check" size={22} color="#1a73e8" />
+            <MaterialIcons name="check" size={22} color="#433e3e" />
           </Pressable>
         </View>
 
@@ -2117,7 +2212,7 @@ export default function QuotesView({
             })}
             {textBoxes.length < MAX_TEXT_BOXES ? (
               <Pressable onPress={addTextBox} style={[styles.boxPickerChip, styles.boxPickerAddChip]}>
-                <Icon source="plus" size={18} color="#1a73e8" />
+                <Icon source="plus" size={18} color="#433e3e" />
                 <Text style={styles.boxPickerAddText}>Add</Text>
               </Pressable>
             ) : null}
@@ -2128,34 +2223,35 @@ export default function QuotesView({
               onPress={() => setTextAlignment(TextAlign.Left)}
               style={[styles.alignButton, resolvedTextAlign === TextAlign.Left && styles.alignButtonActive]}
             >
-              <Icon source="format-align-left" size={24} color={resolvedTextAlign === TextAlign.Left ? '#1a73e8' : '#666'} />
+              <Icon source="format-align-left" size={24} color={resolvedTextAlign === TextAlign.Left ? '#666' : '#666'} />
             </Pressable>
             <Pressable
               onPress={() => setTextAlignment(TextAlign.Center)}
               style={[styles.alignButton, resolvedTextAlign === TextAlign.Center && styles.alignButtonActive]}
             >
-              <Icon source="format-align-center" size={24} color={resolvedTextAlign === TextAlign.Center ? '#1a73e8' : '#666'} />
+              <Icon source="format-align-center" size={24} color={resolvedTextAlign === TextAlign.Center ? '#666' : '#666'} />
             </Pressable>
             <Pressable
               onPress={() => setTextAlignment(TextAlign.Right)}
               style={[styles.alignButton, resolvedTextAlign === TextAlign.Right && styles.alignButtonActive]}
             >
-              <Icon source="format-align-right" size={24} color={resolvedTextAlign === TextAlign.Right ? '#1a73e8' : '#666'} />
+              <Icon source="format-align-right" size={24} color={resolvedTextAlign === TextAlign.Right ? '#666' : '#666'} />
             </Pressable>
           </View>
 
           <Text style={styles.textInputLabel}>
-            {selectedTextBox ? 'Text content for selected box' : 'Text content for all boxes'}
+            {selectedTextBox ? 'Text content for selected box' : 'Text editing is disabled in all-text mode'}
           </Text>
           <TextInput
             ref={selectedTextInputRef}
-            style={styles.quoteTextInput}
+            style={[styles.quoteTextInput, isAllTextMode && styles.quoteTextInputDisabled]}
             placeholder="Enter your text here..."
             placeholderTextColor="#999"
             multiline
             value={selectedTextBox ? selectedTextBox.text : globalQuoteText}
             onChangeText={applyTextChange}
             textAlignVertical="top"
+            editable={!isAllTextMode}
           />
 
           <View style={styles.textEditorActionsRow}>
@@ -2184,200 +2280,205 @@ export default function QuotesView({
 
   return (
     <>
-    <View style={styles.container}>
-      {!isFontsReady ? <LoadingQuoteEditor /> : null}
-      <Appbar.Header>
-        {onBack ? <Appbar.BackAction onPress={onBack} /> : null}
-        <Appbar.Content
-          color='#433e3e'
-          titleStyle={{ fontSize: 25, fontWeight: 'bold' }}
-          title={title}
-          // subtitle={
-          //   saveStatus === 'saving'
-          //     ? 'Saving...'
-          //     : saveStatus === 'saved'
-          //       ? 'Saved'
-          //       : saveStatus === 'error'
-          //         ? 'Autosave failed'
-          //         : 'Autosave on'
-          // }
-        />
-        {onDelete ? (
+      <ImageBackground
+        source={require('../../assets/app_bg.png')}
+        resizeMode="cover"
+        imageStyle={styles.backgroundImage}
+        style={styles.container}
+      >
+        {!isFontsReady ? <LoadingQuoteEditor /> : null}
+        <Appbar.Header style={styles.appbarHeader}>
+          {onBack ? <Appbar.BackAction onPress={onBack} /> : null}
+          <Appbar.Content
+            color='#433e3e'
+            titleStyle={{ fontSize: 25, fontWeight: 'bold' }}
+            title={title}
+            // subtitle={
+            //   saveStatus === 'saving'
+            //     ? 'Saving...'
+            //     : saveStatus === 'saved'
+            //       ? 'Saved'
+            //       : saveStatus === 'error'
+            //         ? 'Autosave failed'
+            //         : 'Autosave on'
+            // }
+          />
+          {onDelete ? (
+            <Appbar.Action
+              icon="delete-outline"
+              onPress={() => {
+                Alert.alert('Delete quote?', 'This quote will be removed permanently.', [
+                  { text: 'Cancel', style: 'cancel' },
+                  { text: 'Delete', style: 'destructive', onPress: () => onDelete() },
+                ]);
+              }}
+            />
+          ) : null}
           <Appbar.Action
-            icon="delete-outline"
+            icon="export"
             onPress={() => {
-              Alert.alert('Delete quote?', 'This quote will be removed permanently.', [
-                { text: 'Cancel', style: 'cancel' },
-                { text: 'Delete', style: 'destructive', onPress: () => onDelete() },
-              ]);
+              setExportModalVisible(true);
+              setExportMenuVisible(false);
             }}
           />
-        ) : null}
-        <Appbar.Action
-          icon="export"
-          onPress={() => {
-            setExportModalVisible(true);
-            setExportMenuVisible(false);
-          }}
-        />
-      </Appbar.Header>
+        </Appbar.Header>
 
-      <View style={[styles.canvasViewport, { paddingBottom: settingsPanelHeight + bottomReserve }]}>
-        <View
-          style={[styles.canvas, { width: canvasWidth, height: canvasHeight, marginHorizontal: horizontalInset }]}
-        >
+        <View style={[styles.canvasViewport, { paddingBottom: settingsPanelHeight + bottomReserve }]}>
           <View
-            style={[
-              styles.previewStage,
-              {
-                width: nativeCanvasWidth,
-                height: nativeCanvasHeight,
-                transform: [{ scale: previewScale }],
-              },
-            ]}
-            pointerEvents="box-none"
+            style={[styles.canvas, { width: canvasWidth, height: canvasHeight, marginHorizontal: horizontalInset }]}
           >
-            <Canvas style={{ width: nativeCanvasWidth, height: nativeCanvasHeight }}>
-              {renderCanvasContent(layoutTextBoxMetrics, nativeCanvasWidth, nativeCanvasHeight)}
-            </Canvas>
-            <View style={StyleSheet.absoluteFill} pointerEvents="box-none">
-              <Pressable style={StyleSheet.absoluteFill} onPress={clearTextFocus} />
-              {textBoxes.map((box) => {
-                const isSelected = box.id === selectedTextBoxId;
-                const metric = layoutTextBoxMetrics.find((item) => item.box.id === box.id);
-                const boxWidth = Math.max(24, nativeCanvasWidth * (box.width_percent ?? DEFAULT_TEXT_BOX_WIDTH));
-                const boxHeight = Math.max(24, (metric?.contentHeight ?? 0) + TEXT_BOX_VERTICAL_PADDING * 2);
-                const x = nativeCanvasWidth * box.x_percent;
-                const y = nativeCanvasHeight * box.y_percent;
+            <View
+              style={[
+                styles.previewStage,
+                {
+                  width: nativeCanvasWidth,
+                  height: nativeCanvasHeight,
+                  transform: [{ scale: previewScale }],
+                },
+              ]}
+              pointerEvents="box-none"
+            >
+              <Canvas style={{ width: nativeCanvasWidth, height: nativeCanvasHeight }}>
+                {renderCanvasContent(layoutTextBoxMetrics, nativeCanvasWidth, nativeCanvasHeight)}
+              </Canvas>
+              <View style={StyleSheet.absoluteFill} pointerEvents="box-none">
+                <Pressable style={StyleSheet.absoluteFill} onPress={clearTextFocus} />
+                {textBoxes.map((box) => {
+                  const isSelected = box.id === selectedTextBoxId;
+                  const metric = layoutTextBoxMetrics.find((item) => item.box.id === box.id);
+                  const boxWidth = Math.max(24, nativeCanvasWidth * (box.width_percent ?? DEFAULT_TEXT_BOX_WIDTH));
+                  const boxHeight = Math.max(24, (metric?.contentHeight ?? 0) + TEXT_BOX_VERTICAL_PADDING * 2);
+                  const x = nativeCanvasWidth * box.x_percent;
+                  const y = nativeCanvasHeight * box.y_percent;
 
-                return (
-                  <Pressable
-                    key={box.id}
-                    onPress={() => handleCanvasTextTap(box.id)}
-                    style={[
-                      styles.textBoxOverlay,
-                      {
-                        left: x,
-                        top: y,
-                        width: boxWidth,
-                        height: boxHeight,
-                      },
-                      isSelected && styles.textBoxOverlaySelected,
-                    ]}
-                  >
-                    {isSelected ? (
-                      <>
-                        <View style={styles.selectionDotTopLeft} />
-                        <View style={styles.selectionDotTopRight} />
-                        <View style={styles.selectionDotBottomLeft} />
-                        <View style={styles.selectionDotBottomRight} />
-                      </>
-                    ) : null}
-                  </Pressable>
-                );
-              })}
-            </View>
-          </View>
-          <Canvas
-            ref={exportCanvasRef}
-            pointerEvents="none"
-            style={{
-              position: 'absolute',
-              left: -10000,
-              top: -10000,
-              width: nativeCanvasWidth,
-              height: nativeCanvasHeight,
-            }}
-          >
-            {renderCanvasContent(layoutTextBoxMetrics, nativeCanvasWidth, nativeCanvasHeight)}
-          </Canvas>
-        </View>
-      </View>
-      <View
-        style={[
-          styles.settingsContainer,
-          {
-            height: settingsPanelHeight,
-            paddingTop: settingsContainerPaddingTop,
-            paddingBottom: settingsContainerPaddingBottomValue,
-          },
-        ]}
-      >
-          {currentFeature && currentFeature !== 'TextEdit' ? (
-            <View style={styles.featurePanelHost}>
-              {renderInlineFeatureContent()}
-            </View>
-          ) : (
-            <>
-              <View style={styles.settingsScrollbarZone}>
-                {showSettingsScrollbar ? (
-                  <View style={[styles.settingsScrollbarTrack, { width: scrollbarTrackWidth }]}>
-                    <View
+                  return (
+                    <Pressable
+                      key={box.id}
+                      onPress={() => handleCanvasTextTap(box.id)}
                       style={[
-                        styles.settingsScrollbarThumb,
+                        styles.textBoxOverlay,
                         {
-                          width: scrollbarThumbSize,
-                          height: scrollbarThumbSize,
-                          borderRadius: scrollbarThumbSize / 2,
-                          transform: [{ translateX: scrollbarThumbX }],
+                          left: x,
+                          top: y,
+                          width: boxWidth,
+                          height: boxHeight,
                         },
-                      ]}
-                    />
-                  </View>
-                ) : null}
-              </View>
-              <View style={[styles.settingsStrip, { height: settingsStripHeight }]}>
-                <ScrollView
-                  horizontal
-                  showsHorizontalScrollIndicator={false}
-                  onLayout={(event) => setSettingsViewportWidth(event.nativeEvent.layout.width)}
-                  onContentSizeChange={(contentWidth) => setSettingsContentWidth(contentWidth)}
-                  onScroll={(event) => setSettingsScrollX(event.nativeEvent.contentOffset.x)}
-                  scrollEventThrottle={16}
-                  contentContainerStyle={styles.settingsScrollContent}
-                >
-                  {featureColumns.map((column, columnIndex) => (
-                    <View
-                      key={`feature-column-${columnIndex}`}
-                      style={[
-                        styles.settingsColumn,
-                        {
-                          width: settingsTileWidth,
-                        },
+                        isSelected && styles.textBoxOverlaySelected,
                       ]}
                     >
-                      {column.map((feature, index) => (
-                        <View
-                          key={`feature-item-${columnIndex}-${index}`}
-                          style={[
-                            styles.settingsGridItem,
-                            {
-                              width: settingsTileWidth,
-                              height: settingsTileHeight,
-                            },
-                          ]}
-                          onTouchEnd={() => HandleFeature(feature.name)}
-                        >
-                          <View style={styles.settingsIconCircle}>{feature.icon}</View>
-                          <Text style={styles.settingsGridItemText}>{feature.label}</Text>
-                        </View>
-                      ))}
-                    </View>
-                  ))}
-                </ScrollView>
+                      {isSelected ? (
+                        <>
+                          <View style={styles.selectionDotTopLeft} />
+                          <View style={styles.selectionDotTopRight} />
+                          <View style={styles.selectionDotBottomLeft} />
+                          <View style={styles.selectionDotBottomRight} />
+                        </>
+                      ) : null}
+                    </Pressable>
+                  );
+                })}
               </View>
-              <View style={[styles.templatesZone, { paddingBottom: templatesZonePaddingBottom }]}>
-                <Pressable
-                  style={styles.templatesButton}
-                  onPress={() => setTemplatesModalVisible(true)}
-                >
-                  <Text style={styles.templatesButtonText}>Templates</Text>
-                </Pressable>
-              </View>
-            </>
-          )}
+            </View>
+            <Canvas
+              ref={exportCanvasRef}
+              pointerEvents="none"
+              style={{
+                position: 'absolute',
+                left: -10000,
+                top: -10000,
+                width: nativeCanvasWidth,
+                height: nativeCanvasHeight,
+              }}
+            >
+              {renderCanvasContent(layoutTextBoxMetrics, nativeCanvasWidth, nativeCanvasHeight)}
+            </Canvas>
+          </View>
         </View>
-    </View>
+        <View
+          style={[
+            styles.settingsContainer,
+            {
+              height: settingsPanelHeight,
+              paddingTop: settingsContainerPaddingTop,
+              paddingBottom: settingsContainerPaddingBottomValue,
+            },
+          ]}
+        >
+            {currentFeature && currentFeature !== 'TextEdit' ? (
+              <View style={styles.featurePanelHost}>
+                {renderInlineFeatureContent()}
+              </View>
+            ) : (
+              <>
+                <View style={styles.settingsScrollbarZone}>
+                  {showSettingsScrollbar ? (
+                    <View style={[styles.settingsScrollbarTrack, { width: scrollbarTrackWidth }]}>
+                      <View
+                        style={[
+                          styles.settingsScrollbarThumb,
+                          {
+                            width: scrollbarThumbSize,
+                            height: scrollbarThumbSize,
+                            borderRadius: scrollbarThumbSize / 2,
+                            transform: [{ translateX: scrollbarThumbX }],
+                          },
+                        ]}
+                      />
+                    </View>
+                  ) : null}
+                </View>
+                <View style={[styles.settingsStrip, { height: settingsStripHeight }]}>
+                  <ScrollView
+                    horizontal
+                    showsHorizontalScrollIndicator={false}
+                    onLayout={(event) => setSettingsViewportWidth(event.nativeEvent.layout.width)}
+                    onContentSizeChange={(contentWidth) => setSettingsContentWidth(contentWidth)}
+                    onScroll={(event) => setSettingsScrollX(event.nativeEvent.contentOffset.x)}
+                    scrollEventThrottle={16}
+                    contentContainerStyle={styles.settingsScrollContent}
+                  >
+                    {featureColumns.map((column, columnIndex) => (
+                      <View
+                        key={`feature-column-${columnIndex}`}
+                        style={[
+                          styles.settingsColumn,
+                          {
+                            width: settingsTileWidth,
+                          },
+                        ]}
+                      >
+                        {column.map((feature, index) => (
+                          <View
+                            key={`feature-item-${columnIndex}-${index}`}
+                            style={[
+                              styles.settingsGridItem,
+                              {
+                                width: settingsTileWidth,
+                                height: settingsTileHeight,
+                              },
+                            ]}
+                            onTouchEnd={() => HandleFeature(feature.name)}
+                          >
+                            <View style={styles.settingsIconCircle}>{feature.icon}</View>
+                            <Text style={styles.settingsGridItemText}>{feature.label}</Text>
+                          </View>
+                        ))}
+                      </View>
+                    ))}
+                  </ScrollView>
+                </View>
+                <View style={[styles.templatesZone, { paddingBottom: templatesZonePaddingBottom }]}>
+                  <Pressable
+                    style={styles.templatesButton}
+                    onPress={() => setTemplatesModalVisible(true)}
+                  >
+                    <Text style={styles.templatesButtonText}>Templates</Text>
+                  </Pressable>
+                </View>
+              </>
+            )}
+          </View>
+      </ImageBackground>
       {renderImageCropModal()}
       <Modal
         visible={modalVisible && currentFeature === 'TextEdit'}
@@ -2544,9 +2645,21 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     height: '100%',
-    backgroundColor: '#fff',
-    //  backgroundColor: 'red'
+    backgroundColor: 'transparent',
 
+  },
+  backgroundImage: {
+    opacity: 0.28,
+  },
+  appbarHeader: {
+    backgroundColor: 'transparent',
+    elevation: 0,
+    shadowOpacity: 0,
+    shadowColor: 'transparent',
+    shadowOffset: { width: 0, height: 0 },
+    shadowRadius: 0,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(236, 236, 236, 0.7)',
   },
   canvasViewport: {
     flex: 1,
@@ -2571,7 +2684,7 @@ const styles = StyleSheet.create({
   },
   textBoxOverlaySelected: {
     borderWidth: 1.5,
-    borderColor: '#1a73e8',
+    borderColor: '#ffc107',
     borderStyle: 'dashed',
   },
   selectionDotTopLeft: {
@@ -2581,7 +2694,7 @@ const styles = StyleSheet.create({
     width: 10,
     height: 10,
     borderRadius: 5,
-    backgroundColor: '#1a73e8',
+    backgroundColor: '#ffc107',
     borderWidth: 2,
     borderColor: '#fff',
   },
@@ -2592,7 +2705,7 @@ const styles = StyleSheet.create({
     width: 10,
     height: 10,
     borderRadius: 5,
-    backgroundColor: '#1a73e8',
+    backgroundColor: '#ffc107',
     borderWidth: 2,
     borderColor: '#fff',
   },
@@ -2603,7 +2716,7 @@ const styles = StyleSheet.create({
     width: 10,
     height: 10,
     borderRadius: 5,
-    backgroundColor: '#1a73e8',
+    backgroundColor: '#ffc107',
     borderWidth: 2,
     borderColor: '#fff',
   },
@@ -2614,7 +2727,7 @@ const styles = StyleSheet.create({
     width: 10,
     height: 10,
     borderRadius: 5,
-    backgroundColor: '#1a73e8',
+    backgroundColor: '#ffc107',
     borderWidth: 2,
     borderColor: '#fff',
   },
@@ -2766,9 +2879,9 @@ const styles = StyleSheet.create({
     borderRadius: 18,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#eef4ff',
+    backgroundColor: '#ffc107',
     borderWidth: 1,
-    borderColor: '#d8e4ff',
+    borderColor: '#ffc107',
   },
   inlineFeatureDoneButton: {
     width: 36,
@@ -2942,8 +3055,8 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   fontChipActive: {
-    backgroundColor: '#e8f0fe',
-    borderColor: '#1a73e8',
+    backgroundColor: '#ffc107',
+    borderColor: '#ffc107',
   },
   fontChipPreviewWrap: {
     width: FONT_PREVIEW_WIDTH,
@@ -2996,7 +3109,7 @@ const styles = StyleSheet.create({
     width: 10,
     height: 10,
     borderRadius: 5,
-    backgroundColor: '#1a73e8',
+    backgroundColor: '#ffc107',
     marginTop: 14,
     marginBottom: 14,
   },
@@ -3031,8 +3144,8 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   weightChipActive: {
-    backgroundColor: '#e8f0fe',
-    borderColor: '#1a73e8',
+    backgroundColor: '#ffc107',
+    borderColor: '#ffc107',
   },
   colorPickerWrap: {
     flex: 1,
@@ -3127,7 +3240,7 @@ const styles = StyleSheet.create({
     borderColor: '#d8d8d8',
   },
   cropPreviewFallbackImage: {
-    resizeMode: 'cover',
+    resizeMode: 'contain',
   },
   cropPreviewClip: {
     flex: 1,
@@ -3138,10 +3251,14 @@ const styles = StyleSheet.create({
     position: 'absolute',
   },
   cropPreviewBorder: {
-    ...StyleSheet.absoluteFillObject,
-    borderRadius: 14,
+    position: 'absolute',
+    borderRadius: 12,
     borderWidth: 2,
     borderColor: '#ffc107',
+  },
+  cropPreviewMask: {
+    position: 'absolute',
+    backgroundColor: 'rgba(0,0,0,0.32)',
   },
   cropPreviewLoading: {
     ...StyleSheet.absoluteFillObject,
@@ -3374,7 +3491,7 @@ const styles = StyleSheet.create({
     borderBottomColor: '#f1f5f9',
   },
   exportMenuItemActive: {
-    backgroundColor: '#e8f0fe',
+    backgroundColor: '#ffc107',
   },
   exportMenuItemText: {
     fontSize: 14,
@@ -3402,7 +3519,7 @@ const styles = StyleSheet.create({
   exportProgressText: {
     fontSize: 20,
     fontWeight: '800',
-    color: '#1a73e8',
+    color: '#433e3e',
   },
   exportStatusText: {
     fontSize: 13,
@@ -3422,10 +3539,10 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   exportCancelButton: {
-    backgroundColor: '#eef2f7',
+    backgroundColor: '#f7f7f8',
   },
   exportPrimaryButton: {
-    backgroundColor: '#1a73e8',
+    backgroundColor: '#ffc107',
   },
   exportActionDisabled: {
     opacity: 0.6,
@@ -3482,8 +3599,8 @@ const styles = StyleSheet.create({
     borderColor: '#e5e7eb',
   },
   boxPickerChipActive: {
-    backgroundColor: '#e8f0fe',
-    borderColor: '#1a73e8',
+    backgroundColor: '#ffc107',
+    borderColor: '#ffc107',
   },
   boxPickerChipText: {
     fontSize: 13,
@@ -3491,7 +3608,7 @@ const styles = StyleSheet.create({
     color: '#444',
   },
   boxPickerChipTextActive: {
-    color: '#1a73e8',
+    color: '#433e3e',
   },
   boxPickerAddChip: {
     borderStyle: 'dashed',
@@ -3499,7 +3616,7 @@ const styles = StyleSheet.create({
   boxPickerAddText: {
     fontSize: 13,
     fontWeight: '600',
-    color: '#1a73e8',
+    color: '#433e3e',
   },
   modalOptions: {
     flexDirection: 'row',
@@ -3561,7 +3678,7 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     paddingVertical: 12,
     alignItems: 'center',
-    backgroundColor: '#e8f0fe',
+    backgroundColor: '#ffc107',
   },
   secondaryActionButtonNeutral: {
     backgroundColor: '#f3f4f6',
@@ -3572,7 +3689,7 @@ const styles = StyleSheet.create({
   secondaryActionButtonText: {
     fontSize: 14,
     fontWeight: '700',
-    color: '#1a73e8',
+    color: '#433e3e',
   },
   dangerActionButton: {
     flex: 1,
@@ -3621,7 +3738,7 @@ const styles = StyleSheet.create({
     borderBottomColor: '#f0f0f0',
   },
   fontOptionActive: {
-    backgroundColor: '#e8f0fe',
+    backgroundColor: '#ffc107',
   },
   fontOptionText: {
     fontSize: 16,
@@ -3630,7 +3747,7 @@ const styles = StyleSheet.create({
   },
   fontOptionTextActive: {
     fontWeight: '600',
-    color: '#1a73e8',
+    color: '#433e3e',
   },
   sizeOptionsContainer: {
     flexDirection: 'row',
@@ -3657,9 +3774,9 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   sizePreviewActive: {
-    borderColor: '#1a73e8',
+    borderColor: '#ffc107',
     borderWidth: 3,
-    backgroundColor: '#e8f0fe',
+    backgroundColor: '#ffc107',
   },
   sizeLabel: {
     fontSize: 14,
@@ -3685,8 +3802,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   weightOptionActive: {
-    borderColor: '#1a73e8',
-    backgroundColor: '#e8f0fe',
+    borderColor: '#ffc107',
+    backgroundColor: '#ffc107',
     borderWidth: 2,
   },
   weightOptionText: {
@@ -3695,7 +3812,7 @@ const styles = StyleSheet.create({
     fontWeight: '500',
   },
   weightOptionTextActive: {
-    color: '#1a73e8',
+    color: '#433e3e',
     fontWeight: '700',
   },
   alignmentContainer: {
@@ -3728,8 +3845,8 @@ const styles = StyleSheet.create({
     backgroundColor: '#f9f9f9',
   },
   alignButtonActive: {
-    borderColor: '#1a73e8',
-    backgroundColor: '#e8f0fe',
+    borderColor: '#ffc107',
+    backgroundColor: '#ffc107',
     borderWidth: 2,
   },
   textInputLabel: {
@@ -3748,8 +3865,12 @@ const styles = StyleSheet.create({
     backgroundColor: '#f9f9f9',
     minHeight: 110,
   },
+  quoteTextInputDisabled: {
+    color: '#8a8a8a',
+    backgroundColor: '#f1f3f5',
+  },
   editCloseButton: {
-    backgroundColor: '#1a73e8',
+    backgroundColor: '#ffc107',
     borderRadius: 999,
     paddingVertical: 12,
     paddingHorizontal: 20,

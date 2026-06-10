@@ -134,7 +134,7 @@ export default function QuoteExportView({
                   >
                     <Text style={styles.menuItemText}>{option.label}</Text>
                     {exportFormat === option.value ? (
-                      <MaterialIcons name="check" size={18} color="#1a73e8" />
+            <MaterialIcons name="check" size={18} color="#433e3e" />
                     ) : null}
                   </Pressable>
                 ))}
@@ -150,14 +150,14 @@ export default function QuoteExportView({
                   start={0}
                   end={1}
                   stroke={{ width: progressConfig.strokeWidth, cap: StrokeCap.Round }}
-                  color="rgba(26, 115, 232, 0.15)"
+                  color="rgba(255, 193, 7, 0.18)"
                 />
                 <Path
                   path={progressConfig.path}
                   start={0}
                   end={Math.max(0, Math.min(1, progressConfig.progress / 100))}
                   stroke={{ width: progressConfig.strokeWidth, cap: StrokeCap.Round }}
-                  color="#1a73e8"
+                  color="#ffc107"
                 />
               </Canvas>
 
@@ -201,7 +201,7 @@ export default function QuoteExportView({
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f7f4ea',
+    backgroundColor: '#fff',
   },
   topBar: {
     flexDirection: 'row',
@@ -212,7 +212,7 @@ const styles = StyleSheet.create({
     paddingBottom: 12,
     backgroundColor: '#fff',
     borderBottomWidth: 1,
-    borderBottomColor: '#ece7d7',
+    borderBottomColor: '#ececec',
   },
   backButton: {
     width: 40,
@@ -220,7 +220,7 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#f3f4f6',
+    backgroundColor: '#fff',
   },
   titleWrap: {
     flex: 1,
@@ -249,7 +249,7 @@ const styles = StyleSheet.create({
   sectionLabel: {
     fontSize: 13,
     fontWeight: '800',
-    color: '#667085',
+    color: '#433e3e',
     textTransform: 'uppercase',
     letterSpacing: 0.6,
   },
@@ -263,15 +263,15 @@ const styles = StyleSheet.create({
     backgroundColor: '#fff',
     padding: 16,
     borderWidth: 1,
-    borderColor: '#ece7d7',
+    borderColor: '#ececec',
   },
   dropdown: {
     minHeight: 50,
     marginTop: 10,
     borderRadius: 16,
     borderWidth: 1,
-    borderColor: '#d7dbe2',
-    backgroundColor: '#f8fafc',
+    borderColor: '#ececec',
+    backgroundColor: '#fff',
     paddingHorizontal: 14,
     flexDirection: 'row',
     alignItems: 'center',
@@ -286,7 +286,7 @@ const styles = StyleSheet.create({
     marginTop: 8,
     borderRadius: 14,
     borderWidth: 1,
-    borderColor: '#e2e8f0',
+    borderColor: '#ececec',
     overflow: 'hidden',
   },
   menuItem: {
@@ -296,23 +296,23 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     borderBottomWidth: 1,
-    borderBottomColor: '#f1f5f9',
+    borderBottomColor: '#ececec',
     backgroundColor: '#fff',
   },
   menuItemActive: {
-    backgroundColor: '#e8f0fe',
+    backgroundColor: '#ffc107',
   },
   menuItemText: {
     fontSize: 14,
     fontWeight: '700',
-    color: '#2d3748',
+    color: '#433e3e',
   },
   progressCard: {
     borderRadius: 24,
     backgroundColor: '#fff',
     padding: 18,
     borderWidth: 1,
-    borderColor: '#ece7d7',
+    borderColor: '#ececec',
     alignItems: 'center',
   },
   progressWrap: {
@@ -333,7 +333,7 @@ const styles = StyleSheet.create({
   progressText: {
     fontSize: 22,
     fontWeight: '800',
-    color: '#1a73e8',
+    color: '#433e3e',
   },
   statusText: {
     marginTop: 12,
@@ -354,10 +354,12 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   secondaryButton: {
-    backgroundColor: '#eef2f7',
+    backgroundColor: '#fff',
+    borderWidth: 1,
+    borderColor: '#ececec',
   },
   primaryButton: {
-    backgroundColor: '#1a73e8',
+    backgroundColor: '#ffc107',
   },
   secondaryText: {
     fontSize: 15,
@@ -367,7 +369,7 @@ const styles = StyleSheet.create({
   primaryText: {
     fontSize: 15,
     fontWeight: '800',
-    color: '#fff',
+    color: '#433e3e',
   },
   disabled: {
     opacity: 0.6,

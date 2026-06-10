@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Keyboard,
+  ImageBackground,
   View,
   Text,
   StyleSheet,
@@ -11,18 +12,35 @@ import {
   LayoutAnimation,
   Platform,
   UIManager,
+  ScrollView,
   useWindowDimensions,
 } from 'react-native';
-import { FAB, Appbar } from 'react-native-paper';
-import { Note } from '../../types/notes';
+import { FAB } from 'react-native-paper';
+import MaterialIcons from '@react-native-vector-icons/material-design-icons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { Note, Notebook } from '../../types/notes';
 import { getResponsiveMetrics } from '../utils/responsive';
 import NativeAdTile from '../ads/NativeAdTile';
 import { htmlToPlainText } from '../../utils/noteContent';
 
 interface NotesViewProps {
   notes?: Note[];
+  notebooks?: Notebook[];
+  activeNotebookId?: string;
+  selectionMode?: boolean;
+  selectedNoteIds?: string[];
+  onNotebookChange?: (notebookId: string) => void;
   onNotePress?: (note: Note) => void;
+  onNoteLongPress?: (note: Note) => void;
   onAddNote?: () => void;
+  onToggleSelection?: (noteId: string) => void;
+  onCancelSelection?: () => void;
+  onSelectAll?: () => void;
+  onMoveSelected?: () => void;
+  onNewCategorySelected?: () => void;
+  pinActionLabel?: string;
+  onPinSelected?: () => void;
+  onDeleteSelected?: () => void;
 }
 
 type NotesListItem =
@@ -31,10 +49,25 @@ type NotesListItem =
 
 export default function NotesView({
   notes: defaultNotes = [],
+  notebooks = [],
+  activeNotebookId = 'all',
+  selectionMode = false,
+  selectedNoteIds = [],
+  onNotebookChange,
   onNotePress,
+  onNoteLongPress,
   onAddNote,
+  onToggleSelection,
+  onCancelSelection,
+  onSelectAll,
+  onMoveSelected,
+  onNewCategorySelected,
+  pinActionLabel = 'Pin',
+  onPinSelected,
+  onDeleteSelected,
 }: NotesViewProps) {
   const { width, height } = useWindowDimensions();
+  const insets = useSafeAreaInsets();
   const layout = getResponsiveMetrics(width, height);
   const searchInputRef = useRef<TextInput | null>(null);
   const [searchActive, setSearchActive] = useState(false);
@@ -71,6 +104,9 @@ export default function NotesView({
   };
 
   const normalizedSearch = searchText.trim().toLowerCase();
+  const notebookMap = useMemo(() => {
+    return new Map(notebooks.map((notebook) => [notebook.id, notebook]));
+  }, [notebooks]);
   const listData = useMemo<NotesListItem[]>(() => {
     const items: NotesListItem[] = [];
     const filteredNotes = defaultNotes.filter((note) => {
@@ -104,20 +140,43 @@ export default function NotesView({
 
   const renderNoteCard = ({ item }: { item: Note }) => {
     const previewText = htmlToPlainText(item.body);
+    const notebook = notebookMap.get(item.notebook_id);
+    const isSelected = selectedNoteIds.includes(item.id);
 
     return (
       <TouchableOpacity
         style={[
           styles.noteCard,
+          selectionMode && styles.noteCardSelectable,
+          isSelected && styles.noteCardSelected,
           {
             borderRadius: layout.cardRadius,
             padding: layout.sectionPadding - 4,
             marginBottom: layout.cardGap,
           },
         ]}
-        onPress={() => onNotePress?.(item)}
+        onPress={() => {
+          if (selectionMode) {
+            onToggleSelection?.(item.id);
+            return;
+          }
+
+          onNotePress?.(item);
+        }}
+        onLongPress={() => onNoteLongPress?.(item)}
         activeOpacity={0.7}
       >
+        <View style={styles.noteBadgeRow}>
+          {item.pinned ? (
+            <View style={[styles.noteBadge, styles.notePinBadge]}>
+              <MaterialIcons name="pin" size={14} color="#222" />
+            </View>
+          ) : null}
+          <View style={styles.noteBadge}>
+            <MaterialIcons name="folder-outline" size={14} color="#222" />
+            <Text style={styles.noteBadgeText}>{notebook?.name || 'Default notebook'}</Text>
+          </View>
+        </View>
         <View style={styles.noteContent}>
           <Text style={[styles.noteTitle, { fontSize: layout.bodySize }]} numberOfLines={2}>
             {item.header}
@@ -128,9 +187,19 @@ export default function NotesView({
             </Text>
           ) : null}
         </View>
-        <Text style={[styles.noteDate, { fontSize: layout.smallTextSize }]}>
-          {formatDate(item.updated_at)}
-        </Text>
+        {selectionMode ? (
+          <View style={[styles.checkboxWrap, isSelected && styles.checkboxWrapSelected]}>
+              <MaterialIcons
+                name={isSelected ? 'checkbox-marked' : 'checkbox-blank-outline'}
+                size={24}
+               // color={isSelected ? '#ffc107' : '#b6b6b6'}
+              />
+          </View>
+        ) : (
+          <Text style={[styles.noteDate, { fontSize: layout.smallTextSize }]}>
+            {formatDate(item.updated_at)}
+          </Text>
+        )}
       </TouchableOpacity>
     );
   };
@@ -154,39 +223,117 @@ export default function NotesView({
     return renderNoteCard({ item: item.note });
   };
 
+  const selectedCount = selectedNoteIds.length;
+  const allSelected = selectionMode && selectedCount > 0 && selectedCount === listData.filter((item) => item.kind === 'note').length;
+
   return (
-    <SafeAreaView style={styles.container}>
-      <Appbar.Header style={[styles.header, { paddingHorizontal: layout.pagePadding }]}>
-        <View style={styles.headerRow}>
-          {searchActive ? (
-            <View style={styles.searchShell}>
-              <TextInput
-                ref={searchInputRef}
-                style={[styles.searchInput, { fontSize: layout.bodySize }]}
-                placeholder="Search notes"
-                placeholderTextColor="#999"
-                value={searchText}
-                onChangeText={setSearchText}
-                autoCapitalize="none"
-                autoCorrect={false}
-                returnKeyType="search"
-                clearButtonMode="while-editing"
-                selectionColor="#433e3e"
-              />
+    <ImageBackground
+      source={require('../../assets/app_bg.png')}
+      resizeMode="cover"
+      imageStyle={styles.backgroundImage}
+      style={styles.container}
+    >
+      <SafeAreaView style={styles.safeArea}>
+      <View style={[styles.topArea, { paddingHorizontal: layout.pagePadding }]}>
+        <View style={{ height: insets.top }} />
+        {selectionMode ? (
+          <View style={styles.selectionHeader}>
+            <TouchableOpacity onPress={onCancelSelection}>
+              <Text style={styles.selectionAction}>Cancel</Text>
+            </TouchableOpacity>
+            <TouchableOpacity onPress={onSelectAll}>
+              <Text style={styles.selectionAction}>{allSelected ? 'Unselect all' : 'Select all'}</Text>
+            </TouchableOpacity>
+          </View>
+        ) : (
+          <View style={styles.headerRow}>
+            <View style={styles.titleBlock}>
+              <Text style={[styles.pageTitle, { fontSize: layout.titleSize + 4 }]}>Notes</Text>
+              <Text style={[styles.noteCount, { fontSize: layout.subtitleSize }]}>
+                {defaultNotes.length} notes
+              </Text>
             </View>
-          ) : (
-            <Appbar.Content
-              color="#433e3e"
-              titleStyle={{ fontSize: layout.titleSize, fontWeight: '800', marginTop: 8 }}
-              title="Notes"
+            <View style={styles.headerActions}>
+              <TouchableOpacity onPress={handleToggleSearch} style={styles.iconAction}>
+                <MaterialIcons
+                  name={searchActive ? 'close' : 'magnify'}
+                  size={26}
+                  color="#222"
+                />
+              </TouchableOpacity>
+            </View>
+          </View>
+        )}
+
+        {!selectionMode && searchActive ? (
+          <View style={styles.searchShell}>
+            <TextInput
+              ref={searchInputRef}
+              style={[styles.searchInput, { fontSize: layout.bodySize }]}
+              placeholder="Search notes"
+              placeholderTextColor="#999"
+              value={searchText}
+              onChangeText={setSearchText}
+              autoCapitalize="none"
+              autoCorrect={false}
+              returnKeyType="search"
+              clearButtonMode="while-editing"
+              selectionColor="#433e3e"
             />
-          )}
-          <Appbar.Action
-            icon={searchActive ? 'close' : 'magnify'}
-            onPress={handleToggleSearch}
-          />
-        </View>
-      </Appbar.Header>
+          </View>
+        ) : null}
+
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.categoryStrip}
+        >
+          <TouchableOpacity
+            style={styles.categoryAddButton}
+            onPress={onNewCategorySelected}
+            activeOpacity={0.8}
+          >
+            <MaterialIcons name="plus" size={18} color="#433e3e" />
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[
+              styles.categoryChip,
+              activeNotebookId === 'all' && styles.categoryChipActive,
+            ]}
+            onPress={() => onNotebookChange?.('all')}
+          >
+            <Text
+              style={[
+                styles.categoryChipText,
+                activeNotebookId === 'all' && styles.categoryChipTextActive,
+              ]}
+            >
+              All notes
+            </Text>
+          </TouchableOpacity>
+
+          {notebooks.map((notebook) => (
+            <TouchableOpacity
+              key={notebook.id}
+              style={[
+                styles.categoryChip,
+                activeNotebookId === notebook.id && styles.categoryChipActive,
+              ]}
+              onPress={() => onNotebookChange?.(notebook.id)}
+            >
+              <Text
+                style={[
+                  styles.categoryChipText,
+                  activeNotebookId === notebook.id && styles.categoryChipTextActive,
+                ]}
+                numberOfLines={1}
+              >
+                {notebook.name}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </ScrollView>
+      </View>
 
       <FlatList
         data={listData}
@@ -217,19 +364,42 @@ export default function NotesView({
         }
       />
 
-      <FAB
-        icon="plus"
-        style={[
-          styles.fab,
-          {
-            margin: layout.sectionPadding,
-            transform: [{ scale: layout.isTablet ? 1.05 : 1 }],
-          },
-        ]}
-        onPress={onAddNote}
-        size={layout.isTablet ? 'large' : 'medium'}
-      />
-    </SafeAreaView>
+      {selectionMode ? (
+        <View style={styles.selectionBar}>
+          <TouchableOpacity style={styles.selectionBarItem} onPress={onMoveSelected}>
+            <MaterialIcons name="folder-move-outline" size={26} color="#222" />
+            <Text style={styles.selectionBarLabel}>Move</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.selectionBarItem} onPress={onNewCategorySelected}>
+            <MaterialIcons name="folder-plus-outline" size={26} color="#222" />
+            <Text style={styles.selectionBarLabel}>New category</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.selectionBarItem} onPress={onPinSelected}>
+            <MaterialIcons name="pin-outline" size={26} color="#222" />
+            <Text style={styles.selectionBarLabel}>{pinActionLabel}</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.selectionBarItem} onPress={onDeleteSelected}>
+            <MaterialIcons name="delete-outline" size={26} color="#222" />
+            <Text style={styles.selectionBarLabel}>Delete</Text>
+          </TouchableOpacity>
+        </View>
+      ) : (
+        <FAB
+          icon="plus"
+          color="#433e3e"
+          style={[
+            styles.fab,
+            {
+              margin: layout.sectionPadding,
+              transform: [{ scale: layout.isTablet ? 1.05 : 1 }],
+            },
+          ]}
+          onPress={onAddNote}
+          size={layout.isTablet ? 'large' : 'medium'}
+        />
+      )}
+      </SafeAreaView>
+    </ImageBackground>
   );
 }
 
@@ -238,19 +408,53 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#fff',
   },
-  header: {
-    backgroundColor: 'transparent',
-    elevation: 0,
+  safeArea: {
+    flex: 1,
+  },
+  backgroundImage: {
+    opacity: 0.6,
+  },
+  topArea: {
+    paddingTop: 14,
+    paddingBottom: 10,
   },
   headerRow: {
-    flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 12,
+  },
+  titleBlock: {
+    flex: 1,
+  },
+  pageTitle: {
+    fontWeight: '800',
+    color: '#111',
+  },
+  noteCount: {
+    color: '#7d7d7d',
+    marginTop: 2,
+  },
+  headerActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  iconAction: {
+    padding: 4,
+  },
+  selectionHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 10,
+  },
+  selectionAction: {
+    fontSize: 16,
+    color: '#c79200',
+    fontWeight: '700',
   },
   searchShell: {
-    flex: 1,
-    marginTop: 8,
-    marginBottom: 8,
+    marginBottom: 12,
     backgroundColor: '#f4f4f4',
     borderRadius: 18,
     paddingHorizontal: 14,
@@ -260,8 +464,44 @@ const styles = StyleSheet.create({
     color: '#222',
     paddingVertical: 8,
   },
+  categoryStrip: {
+    gap: 10,
+    paddingBottom: 6,
+    alignItems: 'center',
+  },
+  categoryAddButton: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#ffc107',
+    borderWidth: 1,
+    borderColor: '#ffc107',
+  },
+  categoryChip: {
+    backgroundColor: '#f4f4f4',
+    borderRadius: 999,
+    paddingHorizontal: 13,
+    paddingVertical: 9,
+    borderWidth: 1,
+    borderColor: '#ececec',
+  },
+  categoryChipActive: {
+    backgroundColor: '#dedede',
+    borderColor: '#dedede',
+  },
+  categoryChipText: {
+    color: '#222',
+    fontWeight: '600',
+    fontSize: 14,
+  },
+  categoryChipTextActive: {
+    color: '#222',
+  },
   listContent: {
     paddingTop: 8,
+    paddingBottom: 110,
   },
   emptyState: {
     paddingHorizontal: 24,
@@ -287,10 +527,46 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'flex-start',
+    position: 'relative',
+  },
+  noteBadgeRow: {
+    position: 'absolute',
+    top: 10,
+    left: 12,
+    zIndex: 2,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  noteBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 999,
+    backgroundColor: '#f1d77c',
+  },
+  notePinBadge: {
+    paddingHorizontal: 6,
+    gap: 0,
+  },
+  noteBadgeText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#222',
   },
   noteContent: {
     flex: 1,
     marginRight: 12,
+    paddingTop: 28,
+  },
+  noteCardSelectable: {
+    borderColor: '#efefef',
+  },
+  noteCardSelected: {
+    // backgroundColor: '#ffc107',
+    // borderColor: '#ffc107',
   },
   noteTitle: {
     fontWeight: '500',
@@ -303,10 +579,26 @@ const styles = StyleSheet.create({
     marginBottom: 8,
     lineHeight: 18,
   },
+  noteMetaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  noteCategory: {
+    color: '#9a9a9a',
+    fontWeight: '600',
+  },
   noteDate: {
     color: '#ccc',
     minWidth: 70,
     textAlign: 'right',
+  },
+  checkboxWrap: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: 30,
+  },
+  checkboxWrapSelected: {
+    transform: [{ scale: 1.02 }],
   },
   nativeAdTile: {
     width: '100%',
@@ -316,5 +608,30 @@ const styles = StyleSheet.create({
     right: 0,
     bottom: 0,
     backgroundColor: '#ffc107',
+  },
+  selectionBar: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'transparent',
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(232, 232, 232, 0.72)',
+    paddingTop: 10,
+    paddingBottom: 14,
+    paddingHorizontal: 12,
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+  },
+  selectionBarItem: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    minWidth: 70,
+    gap: 4,
+  },
+  selectionBarLabel: {
+    fontSize: 12,
+    color: '#222',
+    fontWeight: '600',
   },
 });

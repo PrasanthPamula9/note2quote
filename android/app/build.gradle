@@ -152,5 +152,62 @@ gradle.projectsEvaluated {
             }
         }
     }
+
+    def skiaProject = rootProject.findProject(":shopify_react-native-skia")
+    if (skiaProject != null) {
+        def prefabDebugTask = skiaProject.tasks.findByName("prefabDebugPackage")
+        def prefabReleaseTask = skiaProject.tasks.findByName("prefabReleasePackage")
+        def appProject = rootProject.findProject(":app")
+        if (appProject != null) {
+            if (prefabDebugTask != null) {
+                appProject.tasks.matching { it.name.startsWith("configureCMakeDebug") }.configureEach {
+                    dependsOn(prefabDebugTask)
+                }
+            }
+            if (prefabReleaseTask != null) {
+                appProject.tasks.matching { it.name.startsWith("configureCMakeRelease") }.configureEach {
+                    dependsOn(prefabReleaseTask)
+                }
+            }
+        }
+    }
+
+    def reanimatedProject = rootProject.findProject(":react-native-reanimated")
+    if (reanimatedProject != null) {
+        def prefabDebugTask = reanimatedProject.tasks.findByName("prefabDebugPackage")
+        def prefabReleaseTask = reanimatedProject.tasks.findByName("prefabReleasePackage")
+        def appProject = rootProject.findProject(":app")
+        if (appProject != null) {
+            if (prefabDebugTask != null) {
+                appProject.tasks.matching { it.name.startsWith("configureCMakeDebug") }.configureEach {
+                    dependsOn(prefabDebugTask)
+                }
+            }
+            if (prefabReleaseTask != null) {
+                appProject.tasks.matching { it.name.startsWith("configureCMakeRelease") }.configureEach {
+                    dependsOn(prefabReleaseTask)
+                }
+            }
+        }
+    }
+
+    def workletsProject = rootProject.findProject(":react-native-worklets")
+    if (workletsProject != null) {
+        def prefabDebugTask = workletsProject.tasks.findByName("prefabDebugPackage")
+        def prefabReleaseTask = workletsProject.tasks.findByName("prefabReleasePackage")
+        def appProject = rootProject.findProject(":app")
+        if (appProject != null) {
+            if (prefabDebugTask != null) {
+                appProject.tasks.matching { it.name.startsWith("configureCMakeDebug") }.configureEach {
+                    dependsOn(prefabDebugTask)
+                }
+            }
+            if (prefabReleaseTask != null) {
+                appProject.tasks.matching { it.name.startsWith("configureCMakeRelease") }.configureEach {
+                    dependsOn(prefabReleaseTask)
+                }
+            }
+        }
+    }
 }
 

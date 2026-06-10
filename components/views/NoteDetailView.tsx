@@ -1,7 +1,9 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
   Alert,
+  Keyboard,
   KeyboardAvoidingView,
+  ImageBackground,
   Modal,
   Platform,
   Pressable,
@@ -15,6 +17,7 @@ import {
   useWindowDimensions,
 } from 'react-native';
 import { Appbar, Portal } from 'react-native-paper';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import MaterialIcons from '@react-native-vector-icons/material-design-icons';
 import { launchCamera, launchImageLibrary } from 'react-native-image-picker';
 import MlkitOcr from 'react-native-mlkit-ocr';
@@ -34,7 +37,10 @@ import {
 
 interface NoteDetailViewProps {
   note: Note;
+  isNew?: boolean;
+  notebookLabel?: string;
   onBack?: () => void;
+  onCreate?: (note: Omit<Note, 'id' | 'created_at' | 'updated_at'>) => Promise<Note | void> | Note | void;
   onSave?: (note: Note) => Promise<Note | void> | Note | void;
   onDelete?: (noteId: string) => void;
   onCreateQuote?: (quoteText: string) => void;
@@ -101,12 +107,16 @@ const EMPTY_HTML_STYLE: HtmlStyle = {
 
 export default function NoteDetailView({
   note: initialNote,
+  isNew = false,
+  notebookLabel = 'Default notebook',
   onBack,
+  onCreate,
   onSave,
   onDelete,
   onCreateQuote,
 }: NoteDetailViewProps) {
   const { width, height } = useWindowDimensions();
+  const insets = useSafeAreaInsets();
   const layout = getResponsiveMetrics(width, height);
   const editorRef = useRef<EnrichedTextInputInstance | null>(null);
   const initialEditorBody = formatBodyForEditor(initialNote.body);
@@ -125,7 +135,10 @@ export default function NoteDetailView({
   const [formatSheetVisible, setFormatSheetVisible] = useState(false);
   const [scannerMenuVisible, setScannerMenuVisible] = useState(false);
   const [deleteModalVisible, setDeleteModalVisible] = useState(false);
+  const [keyboardHeight, setKeyboardHeight] = useState(0);
   const isMountedRef = useRef(true);
+  const isNewNoteRef = useRef(isNew);
+  const awaitingCreateSyncRef = useRef(false);
   const saveInFlightRef = useRef(false);
   const hasPendingChangesRef = useRef(false);
   const selectedTextRef = useRef('');
@@ -135,15 +148,23 @@ export default function NoteDetailView({
   });
   const lastSavedKeyRef = useRef(`${initialNote.id}:${initialNote.header}:${initialEditorBody}`);
   const bodyHtmlRef = useRef(initialEditorBody);
+  const isDraftNote = isNewNoteRef.current;
 
   const getDraftKey = (draft: Note) => `${draft.id}:${draft.header}:${draft.body}`;
 
   const persistNote = async (draft: Note) => {
-    if (!onSave) {
+    if (saveInFlightRef.current) {
       return;
     }
 
-    if (saveInFlightRef.current) {
+    const currentHtml = (await editorRef.current?.getHTML()) ?? bodyHtmlRef.current;
+    const nextNote = {
+      ...draft,
+      body: currentHtml,
+      updated_at: Date.now(),
+    };
+
+    if (!onSave && !onCreate) {
       return;
     }
 
@@ -153,13 +174,14 @@ export default function NoteDetailView({
     }
 
     try {
-      const currentHtml = (await editorRef.current?.getHTML()) ?? bodyHtmlRef.current;
-      const nextNote = {
-        ...draft,
-        body: currentHtml,
-        updated_at: Date.now(),
-      };
-      const savedNote = await onSave(nextNote);
+      const savedNote = isNewNoteRef.current
+        ? await onCreate?.({
+            header: nextNote.header,
+            body: nextNote.body,
+            notebook_id: nextNote.notebook_id,
+            pinned: nextNote.pinned,
+          })
+        : await onSave?.(nextNote);
 
       if (!isMountedRef.current) {
         return;
@@ -176,7 +198,11 @@ export default function NoteDetailView({
       lastSavedKeyRef.current = getDraftKey(resolvedNote);
       hasPendingChangesRef.current = false;
       latestNoteRef.current = resolvedNote;
+      if (isNewNoteRef.current) {
+        awaitingCreateSyncRef.current = true;
+      }
       setNote(resolvedNote);
+      isNewNoteRef.current = false;
     } finally {
       saveInFlightRef.current = false;
       if (isMountedRef.current) {
@@ -199,6 +225,32 @@ export default function NoteDetailView({
   }, []);
 
   useEffect(() => {
+    const onKeyboardShow = (event: { endCoordinates?: { height?: number } }) => {
+      setKeyboardHeight(event.endCoordinates?.height ?? 0);
+    };
+
+    const onKeyboardHide = () => {
+      setKeyboardHeight(0);
+    };
+
+    const showSub = Keyboard.addListener('keyboardDidShow', onKeyboardShow);
+    const hideSub = Keyboard.addListener('keyboardDidHide', onKeyboardHide);
+
+    return () => {
+      showSub.remove();
+      hideSub.remove();
+    };
+  }, []);
+
+  useEffect(() => {
+    isNewNoteRef.current = isNew;
+  }, [isNew]);
+
+  useEffect(() => {
+    if (awaitingCreateSyncRef.current && initialNote.id !== note.id) {
+      return;
+    }
+
     if (initialNote.id !== note.id) {
       const nextEditorBody = formatBodyForEditor(initialNote.body);
       const nextBodyText = getQuoteTextFromHtml(initialNote.body);
@@ -214,9 +266,16 @@ export default function NoteDetailView({
       bodyHtmlRef.current = nextEditorBody;
       lastSavedKeyRef.current = getDraftKey(nextNote);
       hasPendingChangesRef.current = false;
+      isNewNoteRef.current = isNew;
+      awaitingCreateSyncRef.current = false;
       setStyleState(EMPTY_STYLE_STATE);
+      return;
     }
-  }, [initialNote, note.id]);
+
+    if (awaitingCreateSyncRef.current && initialNote.id === note.id) {
+      awaitingCreateSyncRef.current = false;
+    }
+  }, [initialNote, isNew, note.id]);
 
   const flushAndClose = async () => {
     if (hasPendingChangesRef.current) {
@@ -300,6 +359,11 @@ export default function NoteDetailView({
   const wordCount = bodyWordCount;
   const toolbarColor = '#433e3e';
   const quoteText = bodyText.trim();
+  const keyboardSpacer = keyboardHeight > 0 ? keyboardHeight + 24 : 0;
+  const editorMinHeight = Math.max(
+    layout.isTablet ? 360 : 280,
+    Math.round((height - keyboardHeight) * (layout.isTablet ? 0.42 : 0.34)),
+  );
   const getQuoteSourceText = () => {
     const selectedText = selectedTextRef.current.trim();
     return selectedText || quoteText;
@@ -312,19 +376,27 @@ export default function NoteDetailView({
   };
 
   return (
-    <SafeAreaView style={styles.container}>
-      <View style={[styles.frame, { maxWidth: layout.contentMaxWidth }]}>
-        <Appbar.Header style={styles.header}>
-          <Appbar.BackAction onPress={() => void flushAndClose()} />
-          <View style={styles.headerActions}>
-            <TouchableOpacity style={styles.topIconButton} onPress={handleDelete}>
-              <MaterialIcons name="trash-can-outline" size={24} color="#222" />
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.checkButton} onPress={() => void flushAndClose()}>
-              <MaterialIcons name="check" size={26} color="#222" />
-            </TouchableOpacity>
-          </View>
-        </Appbar.Header>
+    <ImageBackground
+      source={require('../../assets/app_bg.png')}
+      resizeMode="cover"
+      imageStyle={styles.backgroundImage}
+      style={styles.container}
+    >
+      <SafeAreaView style={styles.safeArea}>
+        <View style={[styles.frame, { maxWidth: layout.contentMaxWidth }]}>
+          <Appbar.Header style={styles.header}>
+            <Appbar.BackAction onPress={() => void flushAndClose()} />
+            <View style={styles.headerActions}>
+              {!isDraftNote ? (
+                <TouchableOpacity style={styles.topIconButton} onPress={handleDelete}>
+                  <MaterialIcons name="trash-can-outline" size={24} color="#222" />
+                </TouchableOpacity>
+              ) : null}
+              <TouchableOpacity style={styles.checkButton} onPress={() => void flushAndClose()}>
+                <MaterialIcons name="check" size={26} color="#222" />
+              </TouchableOpacity>
+            </View>
+          </Appbar.Header>
 
         <KeyboardAvoidingView
           style={styles.keyboardContainer}
@@ -332,117 +404,127 @@ export default function NoteDetailView({
         >
           <ScrollView
             style={styles.editorShell}
-            keyboardShouldPersistTaps="handled"
-            showsVerticalScrollIndicator={false}
             contentContainerStyle={[
               styles.editorShellContent,
               {
+                flexGrow: 1,
                 paddingHorizontal: layout.pagePadding,
-                paddingBottom: layout.sectionPadding + 96,
+                paddingTop: 14,
+                paddingBottom: layout.sectionPadding + insets.bottom + keyboardSpacer,
               },
             ]}
+            keyboardShouldPersistTaps="handled"
+            keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
+            nestedScrollEnabled
+            showsVerticalScrollIndicator={false}
+            scrollEventThrottle={16}
           >
             <Text style={[styles.metadataLine, { fontSize: layout.smallTextSize }]}>
-              {formatDate(note.updated_at)}  |  {wordCount}  |  Default notebook
+              {formatDate(note.updated_at)}  |  {wordCount}  |  {notebookLabel}
             </Text>
 
               <TextInput
                 style={[styles.titleInput, { fontSize: layout.titleSize }]}
                 placeholder="Header"
                 value={note.header}
-                onChangeText={(text) => {
-                  latestNoteRef.current = {
-                    ...latestNoteRef.current,
-                    header: text,
-                  };
-                  setNote((currentNote) => ({
-                    ...currentNote,
-                    header: text,
-                  }));
-                  hasPendingChangesRef.current = true;
-                }}
-                placeholderTextColor="#a9a09a"
-                editable
-                autoCapitalize="sentences"
-                selectionColor={toolbarColor}
-              />
-
-            <EnrichedTextInput
-              key={note.id}
-              ref={editorRef}
-              defaultValue={formatBodyForEditor(note.body)}
-              autoFocus
-              placeholder="Start writing your note..."
-              placeholderTextColor="#b5aca3"
-              cursorColor={toolbarColor}
+              onChangeText={(text) => {
+                latestNoteRef.current = {
+                  ...latestNoteRef.current,
+                  header: text,
+                };
+                setNote((currentNote) => ({
+                  ...currentNote,
+                  header: text,
+                }));
+                hasPendingChangesRef.current = true;
+              }}
+              placeholderTextColor="#a9a09a"
+              editable
+              autoCapitalize="sentences"
               selectionColor={toolbarColor}
-              style={[
-                styles.richEditor,
-                {
-                  fontSize: layout.bodySize,
-                  lineHeight: Math.round(layout.bodySize * 1.55),
-                  minHeight: layout.isTablet ? 380 : 320,
-                },
-              ]}
-              htmlStyle={EMPTY_HTML_STYLE}
-              submitBehavior="newline"
-              useHtmlNormalizer
-              onChangeText={(event) => {
-                const nextBodyText = event.nativeEvent.value;
-                setBodyText(nextBodyText);
-                setBodyHasContent(Boolean(nextBodyText.trim()));
-                setBodyWordCount(
-                  nextBodyText.trim()
-                    ? nextBodyText.trim().split(/\s+/).filter(Boolean).length
-                    : 0,
-                );
-                hasPendingChangesRef.current = true;
-              }}
-              onChangeHtml={(event) => {
-                bodyHtmlRef.current = event.nativeEvent.value;
-                hasPendingChangesRef.current = true;
-              }}
-              onChangeSelection={(event) => {
-                selectedTextRef.current = event.nativeEvent.text || '';
-              }}
-              onChangeState={(event) => setStyleState(event.nativeEvent)}
-              androidExperimentalSynchronousEvents
             />
+
+            <View style={styles.editorBody}>
+              <View style={[styles.editorViewport, { minHeight: editorMinHeight }]}>
+                <EnrichedTextInput
+                  key={note.id}
+                  ref={editorRef}
+                  defaultValue={formatBodyForEditor(note.body)}
+                  placeholder="Start writing your note..."
+                  placeholderTextColor="#b5aca3"
+                  cursorColor={toolbarColor}
+                  selectionColor={toolbarColor}
+                  scrollEnabled={false}
+                  style={StyleSheet.flatten([
+                    styles.richEditor,
+                    {
+                      fontSize: layout.bodySize,
+                      lineHeight: Math.round(layout.bodySize * 1.55),
+                      minHeight: editorMinHeight,
+                    },
+                  ])}
+                  htmlStyle={EMPTY_HTML_STYLE}
+                  submitBehavior="newline"
+                  useHtmlNormalizer
+                  onChangeText={(event) => {
+                    const nextBodyText = event.nativeEvent.value;
+                    setBodyText(nextBodyText);
+                    setBodyHasContent(Boolean(nextBodyText.trim()));
+                    setBodyWordCount(
+                      nextBodyText.trim()
+                        ? nextBodyText.trim().split(/\s+/).filter(Boolean).length
+                        : 0,
+                    );
+                    hasPendingChangesRef.current = true;
+                  }}
+                  onChangeHtml={(event) => {
+                    bodyHtmlRef.current = event.nativeEvent.value;
+                    hasPendingChangesRef.current = true;
+                  }}
+                  onChangeSelection={(event) => {
+                    selectedTextRef.current = event.nativeEvent.text || '';
+                  }}
+                  onChangeState={(event) => setStyleState(event.nativeEvent)}
+                  androidExperimentalSynchronousEvents
+                />
+              </View>
+            </View>
           </ScrollView>
 
-          <View style={styles.bottomActionBar}>
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={styles.bottomActionContent}
-            >
-              <ToolbarPill
-                label="Aa"
-                onPress={() => setFormatSheetVisible(true)}
-                active={formatSheetVisible}
-                wide
-              />
-              <ToolbarPill
-                label="Create quote"
-                icon="format-quote-open"
-                onPress={() => {
-                  const sourceText = getQuoteSourceText();
-                  if (sourceText) {
-                    onCreateQuote?.(sourceText);
-                  }
-                }}
-                disabled={!getQuoteSourceText()}
-              />
-              <ToolbarPill
-                label="Scan"
-                icon="scanner"
-                onPress={() => setScannerMenuVisible(true)}
-              />
-            </ScrollView>
-          </View>
-        </KeyboardAvoidingView>
+            <View style={styles.bottomActionBar}>
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={styles.bottomActionContent}
+                keyboardShouldPersistTaps="handled"
+              >
+                <ToolbarPill
+                  label="Aa"
+                  onPress={() => setFormatSheetVisible(true)}
+                  active={formatSheetVisible}
+                  wide
+                />
+                <ToolbarPill
+                  label="Create quote"
+                  icon="format-quote-open"
+                  onPress={() => {
+                    const sourceText = getQuoteSourceText();
+                    if (sourceText) {
+                      onCreateQuote?.(sourceText);
+                    }
+                  }}
+                  disabled={!getQuoteSourceText()}
+                />
+                <ToolbarPill
+                  label="Scan"
+                  icon="scanner"
+                  onPress={() => setScannerMenuVisible(true)}
+                />
+              </ScrollView>
+            </View>
+          </KeyboardAvoidingView>
 
-        <Portal>
+          <Portal>
           <Modal
             visible={formatSheetVisible}
             transparent
@@ -525,19 +607,19 @@ export default function NoteDetailView({
               style={styles.sheetOverlay}
               onPress={() => setScannerMenuVisible(false)}
             >
-              <View style={styles.actionMenu}>
-                <Text style={styles.actionMenuTitle}>Scan document</Text>
-                <TouchableOpacity
-                  style={styles.actionMenuItem}
-                  onPress={() => void scanImageForText('camera')}
-                >
+                <View style={styles.actionMenu}>
+                  <Text style={styles.actionMenuTitle}>Scan document</Text>
+                  <TouchableOpacity
+                    style={styles.actionMenuItem}
+                    onPress={() => void scanImageForText('camera')}
+                  >
                   <MaterialIcons name="camera-outline" size={22} color="#222" />
                   <Text style={styles.actionMenuItemText}>Take photo</Text>
                 </TouchableOpacity>
                 <TouchableOpacity
-                  style={styles.actionMenuItem}
-                  onPress={() => void scanImageForText('library')}
-                >
+                    style={styles.actionMenuItem}
+                    onPress={() => void scanImageForText('library')}
+                  >
                   <MaterialIcons name="image-outline" size={22} color="#222" />
                   <Text style={styles.actionMenuItemText}>Choose image</Text>
                 </TouchableOpacity>
@@ -575,9 +657,10 @@ export default function NoteDetailView({
               </View>
             </Pressable>
           </Modal>
-        </Portal>
-      </View>
-    </SafeAreaView>
+          </Portal>
+        </View>
+      </SafeAreaView>
+    </ImageBackground>
   );
 
   function handleDelete() {
@@ -680,7 +763,13 @@ function FormatButton({
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#fff',
+    backgroundColor: 'transparent',
+  },
+  backgroundImage: {
+    opacity: 0.6,
+  },
+  safeArea: {
+    flex: 1,
   },
   frame: {
     flex: 1,
@@ -688,10 +777,14 @@ const styles = StyleSheet.create({
     width: '100%',
   },
   header: {
-    backgroundColor: '#fff',
+    backgroundColor: 'transparent',
     elevation: 0,
+    shadowOpacity: 0,
+    shadowColor: 'transparent',
+    shadowOffset: { width: 0, height: 0 },
+    shadowRadius: 0,
     borderBottomWidth: 1,
-    borderBottomColor: '#f0f0f0',
+    borderBottomColor: 'rgba(240, 240, 240, 0.72)',
   },
   headerActions: {
     flexDirection: 'row',
@@ -715,8 +808,12 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   editorShellContent: {
-    paddingTop: 14,
-    paddingBottom: 16,
+    flexGrow: 1,
+    minHeight: 0,
+  },
+  editorBody: {
+    flex: 1,
+    minHeight: 0,
   },
   metadataLine: {
     color: '#8e8e8e',
@@ -729,21 +826,29 @@ const styles = StyleSheet.create({
     padding: 0,
     marginBottom: 18,
   },
+  editorViewport: {
+    width: '100%',
+    overflow: 'hidden',
+    flex: 1,
+    minHeight: 0,
+  },
   richEditor: {
     color: '#27211d',
     padding: 0,
-    minHeight: 320,
+    flex: 1,
   },
   bottomActionBar: {
     borderTopWidth: 1,
-    borderTopColor: '#f0f0f0',
-    backgroundColor: '#fff',
+    borderTopColor: 'rgba(240, 240, 240, 0.72)',
+    backgroundColor: 'transparent',
     paddingHorizontal: 12,
     paddingVertical: 10,
   },
   bottomActionContent: {
+    flexDirection: 'row',
     alignItems: 'center',
     paddingRight: 8,
+    gap: 10,
   },
   toolbarPill: {
     flexDirection: 'row',
@@ -817,8 +922,8 @@ const styles = StyleSheet.create({
     borderColor: '#ececec',
   },
   presetChipActive: {
-    backgroundColor: '#f5b700',
-    borderColor: '#f5b700',
+    backgroundColor: '#ffc107',
+    borderColor: '#ffc107',
   },
   presetChipText: {
     fontSize: 15,

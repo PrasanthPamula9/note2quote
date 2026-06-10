@@ -34,6 +34,8 @@ export default function NoteCreationModal({
       onCreate?.({
         header: header.trim() || 'Untitled Note',
         body: body.trim(),
+        notebook_id: 'default-notebook',
+        pinned: 0,
       });
       setHeader('');
       setBody('');
@@ -48,7 +50,7 @@ export default function NoteCreationModal({
   };
 
   return (
-    <Modal visible={visible} animationType="slide" onRequestClose={handleClose}>
+      <Modal visible={visible} animationType="slide" onRequestClose={handleClose}>
       <SafeAreaView style={styles.container}>
         <View style={[styles.sheet, { maxWidth: layout.modalWidth }]}>
         {/* Header */}
@@ -101,7 +103,7 @@ export default function NoteCreationModal({
         </View> */}
         </View>
       </SafeAreaView>
-    </Modal>
+      </Modal>
   );
 }
 
