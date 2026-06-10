@@ -86,6 +86,18 @@ You've successfully run and modified your React Native App. :partying_face:
 
 If you're having issues getting the above steps to work, see the [Troubleshooting](https://reactnative.dev/docs/troubleshooting) page.
 
+## Unsplash Picker
+
+To enable the Unsplash image picker for quote backgrounds, add your access key to `app.json`:
+
+```json
+{
+  "unsplash_access_key": "YOUR_UNSPLASH_ACCESS_KEY"
+}
+```
+
+The app uses that key to search photos, track the download request when a user selects an image, and keep photographer attribution attached to the quote.
+
 # Learn More
 
 To learn more about React Native, take a look at the following resources:

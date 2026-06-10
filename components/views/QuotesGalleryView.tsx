@@ -1,11 +1,13 @@
 import React from 'react';
 import {
+  Alert,
   FlatList,
   ImageBackground,
   Keyboard,
   LayoutAnimation,
   Platform,
   Pressable,
+  Modal,
   ScrollView,
   StyleSheet,
   Text,
@@ -16,7 +18,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import MaterialIcons from '@react-native-vector-icons/material-design-icons';
-import { Quote, QuoteCategory } from '../../types/quotes';
+import { Quote, QuoteCategory, type UserProfile } from '../../types/quotes';
 import { normalizeQuoteEditorConfig } from '../../utils/quoteConfig';
 import { getResponsiveMetrics } from '../utils/responsive';
 import NativeAdTile from '../ads/NativeAdTile';
@@ -40,6 +42,8 @@ type QuotesGalleryViewProps = {
   pinActionLabel?: string;
   onPinSelected?: () => void;
   onDeleteSelected?: () => void;
+  userProfile: UserProfile;
+  onUserProfileSave?: (profile: UserProfile) => Promise<void> | void;
 };
 
 type GalleryItem = (Quote & { kind: 'quote' }) | { id: string; kind: 'add' };
@@ -70,6 +74,8 @@ export default function QuotesGalleryView({
   pinActionLabel = 'Pin',
   onPinSelected,
   onDeleteSelected,
+  userProfile,
+  onUserProfileSave,
 }: QuotesGalleryViewProps) {
   const { width, height } = useWindowDimensions();
   const insets = useSafeAreaInsets();
@@ -77,6 +83,8 @@ export default function QuotesGalleryView({
   const searchInputRef = React.useRef<TextInput | null>(null);
   const [searchActive, setSearchActive] = React.useState(false);
   const [searchText, setSearchText] = React.useState('');
+  const [settingsVisible, setSettingsVisible] = React.useState(false);
+  const [draftProfile, setDraftProfile] = React.useState<UserProfile>(userProfile);
 
   React.useEffect(() => {
     if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
@@ -96,6 +104,12 @@ export default function QuotesGalleryView({
     return () => cancelAnimationFrame(handle);
   }, [searchActive, selectionMode]);
 
+  React.useEffect(() => {
+    if (settingsVisible) {
+      setDraftProfile(userProfile);
+    }
+  }, [settingsVisible, userProfile]);
+
   const handleToggleSearch = () => {
     LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
     if (searchActive) {
@@ -106,6 +120,32 @@ export default function QuotesGalleryView({
     }
 
     setSearchActive(true);
+  };
+
+  const handleOpenSettings = () => {
+    setDraftProfile(userProfile);
+    setSettingsVisible(true);
+  };
+
+  const handleSaveSettings = async () => {
+    const resolvedProfile: UserProfile = {
+      name: draftProfile.name.trim(),
+      email: draftProfile.email.trim(),
+      instagram_handle: draftProfile.instagram_handle.trim(),
+    };
+
+    if (!onUserProfileSave) {
+      setSettingsVisible(false);
+      return;
+    }
+
+    try {
+      await onUserProfileSave(resolvedProfile);
+      setSettingsVisible(false);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unable to save settings.';
+      Alert.alert('Save failed', message);
+    }
   };
 
   const normalizedSearch = searchText.trim().toLowerCase();
@@ -135,6 +175,7 @@ export default function QuotesGalleryView({
     () => `${selectionMode ? '1' : '0'}|${selectedQuoteIds.join(',')}|${activeCategoryId}|${normalizedSearch}`,
     [activeCategoryId, normalizedSearch, selectedQuoteIds, selectionMode],
   );
+  const listKey = `quotes-list-${refreshKey}-cols-${layout.listColumns}`;
 
   const selectedCount = selectedQuoteIds.length;
   const allSelected = selectionMode && selectedCount > 0 && selectedCount === filteredQuotes.length;
@@ -165,6 +206,9 @@ export default function QuotesGalleryView({
               </Text>
             </View>
             <View style={styles.headerActions}>
+              <Pressable onPress={handleOpenSettings} style={styles.iconAction}>
+                <MaterialIcons name="cog" size={24} color="#222" />
+              </Pressable>
               <Pressable onPress={handleToggleSearch} style={styles.iconAction}>
                 <MaterialIcons
                   name={searchActive ? 'close' : 'magnify'}
@@ -250,7 +294,7 @@ export default function QuotesGalleryView({
       </View>
 
       <FlatList
-        key={`quotes-list-${refreshKey}`}
+        key={listKey}
         data={listData}
         numColumns={layout.listColumns}
         keyExtractor={(item) => item.id}
@@ -384,6 +428,69 @@ export default function QuotesGalleryView({
           </Pressable>
         </View>
       ) : null}
+
+      <Modal
+        visible={settingsVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setSettingsVisible(false)}
+      >
+        <Pressable style={styles.modalOverlay} onPress={() => setSettingsVisible(false)}>
+          <Pressable style={styles.settingsSheet} onPress={() => null}>
+            <View style={styles.settingsSheetHeader}>
+              <Text style={styles.settingsSheetTitle}>Profile settings</Text>
+              <Pressable onPress={() => setSettingsVisible(false)} hitSlop={10}>
+                <MaterialIcons name="close" size={22} color="#222" />
+              </Pressable>
+            </View>
+
+            <View style={styles.settingsField}>
+              <Text style={styles.settingsLabel}>Name</Text>
+              <TextInput
+                style={styles.settingsInput}
+                value={draftProfile.name}
+                onChangeText={(value) => setDraftProfile((current) => ({ ...current, name: value }))}
+                placeholder="Your name"
+                placeholderTextColor="#999"
+              />
+            </View>
+
+            <View style={styles.settingsField}>
+              <Text style={styles.settingsLabel}>Email</Text>
+              <TextInput
+                style={styles.settingsInput}
+                value={draftProfile.email}
+                onChangeText={(value) => setDraftProfile((current) => ({ ...current, email: value }))}
+                placeholder="you@example.com"
+                placeholderTextColor="#999"
+                keyboardType="email-address"
+                autoCapitalize="none"
+              />
+            </View>
+
+            <View style={styles.settingsField}>
+              <Text style={styles.settingsLabel}>Instagram handle</Text>
+              <TextInput
+                style={styles.settingsInput}
+                value={draftProfile.instagram_handle}
+                onChangeText={(value) => setDraftProfile((current) => ({ ...current, instagram_handle: value }))}
+                placeholder="@yourhandle"
+                placeholderTextColor="#999"
+                autoCapitalize="none"
+              />
+            </View>
+
+            <View style={styles.settingsActions}>
+              <Pressable style={[styles.settingsButton, styles.settingsButtonSecondary]} onPress={() => setSettingsVisible(false)}>
+                <Text style={styles.settingsButtonSecondaryText}>Cancel</Text>
+              </Pressable>
+              <Pressable style={[styles.settingsButton, styles.settingsButtonPrimary]} onPress={() => void handleSaveSettings()}>
+                <Text style={styles.settingsButtonPrimaryText}>Save</Text>
+              </Pressable>
+            </View>
+          </Pressable>
+        </Pressable>
+      </Modal>
     </ImageBackground>
   );
 }
@@ -406,7 +513,7 @@ function QuoteGalleryPreview({
   const previewText = config.quote_text?.trim() || quote.quote_text || 'Quote';
   const showPinned = Boolean(quote.pinned);
   const previewTextColor = getReadableTextColor(config.bg_color, config.font_color);
-  const previewBackgroundColor = getPreviewBackgroundColor(config.bg_color);
+  const previewBackgroundColor = config.bg_color || '#000000';
 
   return (
     <View style={[styles.quoteTile, { backgroundColor: previewBackgroundColor, borderRadius: cardRadius }]}>
@@ -515,36 +622,6 @@ function getReadableTextColor(backgroundColor: string, preferredColor: string) {
   return isLightText(preferredColor) ? '#222222' : preferredColor;
 }
 
-function getPreviewBackgroundColor(backgroundColor: string) {
-  const bg = String(backgroundColor || '').trim().toLowerCase();
-  if (!bg || bg === 'transparent' || bg === 'none') {
-    return '#f5f5f5';
-  }
-
-  if (bg.startsWith('#')) {
-    const hex = bg.slice(1);
-    if (hex.length === 8) {
-      const alpha = Number.parseInt(hex.slice(6, 8), 16);
-      if (!Number.isNaN(alpha) && alpha < 32) {
-        return '#f5f5f5';
-      }
-    }
-
-    return backgroundColor;
-  }
-
-  const rgbaMatch = bg.match(/^rgba?\((\d+),\s*(\d+),\s*(\d+)(?:,\s*([\d.]+))?\)$/);
-  if (rgbaMatch) {
-    const alpha = rgbaMatch[4] != null ? Number.parseFloat(rgbaMatch[4]) : 1;
-    if (Number.isFinite(alpha) && alpha < 0.15) {
-      return '#f5f5f5';
-    }
-    return backgroundColor;
-  }
-
-  return backgroundColor;
-}
-
 function isLightText(color: string) {
   const normalized = color.trim().toLowerCase();
   return normalized === '#fff' || normalized === '#ffffff' || normalized === 'white';
@@ -585,6 +662,76 @@ const styles = StyleSheet.create({
   },
   iconAction: {
     padding: 4,
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.34)',
+    justifyContent: 'flex-end',
+  },
+  settingsSheet: {
+    backgroundColor: '#fff',
+    borderTopLeftRadius: 22,
+    borderTopRightRadius: 22,
+    paddingHorizontal: 18,
+    paddingTop: 16,
+    paddingBottom: 18,
+    gap: 14,
+  },
+  settingsSheetHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  settingsSheetTitle: {
+    fontSize: 18,
+    fontWeight: '800',
+    color: '#111',
+  },
+  settingsField: {
+    gap: 6,
+  },
+  settingsLabel: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#555',
+  },
+  settingsInput: {
+    borderWidth: 1,
+    borderColor: '#e6e6e6',
+    borderRadius: 14,
+    backgroundColor: '#f9f9f9',
+    color: '#222',
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    fontSize: 15,
+  },
+  settingsActions: {
+    flexDirection: 'row',
+    gap: 12,
+    marginTop: 4,
+  },
+  settingsButton: {
+    flex: 1,
+    minHeight: 46,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  settingsButtonSecondary: {
+    backgroundColor: '#f4f4f4',
+  },
+  settingsButtonPrimary: {
+    backgroundColor: '#111',
+  },
+  settingsButtonSecondaryText: {
+    color: '#222',
+    fontSize: 15,
+    fontWeight: '700',
+  },
+  settingsButtonPrimaryText: {
+    color: '#fff',
+    fontSize: 15,
+    fontWeight: '700',
   },
   selectionHeader: {
     flexDirection: 'row',

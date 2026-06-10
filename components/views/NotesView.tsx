@@ -545,7 +545,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
     paddingVertical: 4,
     borderRadius: 999,
-    backgroundColor: '#f1d77c',
+    backgroundColor: '#dddcda',
   },
   notePinBadge: {
     paddingHorizontal: 6,

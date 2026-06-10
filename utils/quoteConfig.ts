@@ -8,7 +8,7 @@ import type {
   QuoteTextBox,
 } from '../types/quotes';
 
-export const DEFAULT_QUOTE_TEXT = 'Go and build something amazing with React Native Skia!';
+export const DEFAULT_QUOTE_TEXT = 'Go and build something amazing with Note2QuoteAPP!';
 export const DEFAULT_AUTHOR_TEXT = '- Author_name';
 export const MAX_TEXT_BOXES = 5;
 export const DEFAULT_TEXT_BOX_WIDTH = 0.55;
@@ -25,6 +25,8 @@ export const DEFAULT_EDITOR_CONFIG: QuoteEditorConfig = {
   activeCanvasKey: 'instagram_post_square',
   background_image_uri: null,
   background_image_crop: null,
+  background_image_source: null,
+  unsplash_attribution: null,
   image_opacity: DEFAULT_EDITOR_IMAGE_OPACITY,
   font_size: DEFAULT_EDITOR_FONT_SIZE,
   font_color: DEFAULT_EDITOR_FONT_COLOR,
@@ -772,13 +774,19 @@ export const BACKGROUND_QUOTE_TEMPLATES: QuoteTemplate[] = [
   },
 ];
 
-export const getRandomColorQuoteTemplate = (quoteText = DEFAULT_QUOTE_TEXT) => {
+export const getRandomColorQuoteTemplate = (
+  quoteText = DEFAULT_QUOTE_TEXT,
+  authorText = DEFAULT_AUTHOR_TEXT,
+) => {
   const index = Math.floor(Math.random() * NON_STORY_COLOR_TEMPLATE_SPECS.length);
-  return buildColorTemplate(NON_STORY_COLOR_TEMPLATE_SPECS[index], quoteText);
+  return buildColorTemplate(NON_STORY_COLOR_TEMPLATE_SPECS[index], quoteText, authorText);
 };
 
-export const getRandomColorQuoteEditorConfig = (quoteText = DEFAULT_QUOTE_TEXT) =>
-  quoteTemplateToEditorConfig(getRandomColorQuoteTemplate(quoteText), quoteText);
+export const getRandomColorQuoteEditorConfig = (
+  quoteText = DEFAULT_QUOTE_TEXT,
+  authorText = DEFAULT_AUTHOR_TEXT,
+) =>
+  quoteTemplateToEditorConfig(getRandomColorQuoteTemplate(quoteText, authorText), quoteText);
 
 export const clampPercentValue = (value: number, min: number, max: number) =>
   Math.min(max, Math.max(min, value));
@@ -957,6 +965,16 @@ export const normalizeQuoteEditorConfig = (
     text_align: normalizeTextAlign(config?.text_align ?? base.text_align),
     background_image_uri: config?.background_image_uri ?? null,
     background_image_crop: normalizeImageCrop(config?.background_image_crop),
+    background_image_source: config?.background_image_source ?? null,
+    unsplash_attribution: config?.unsplash_attribution
+      ? {
+          photo_id: String(config.unsplash_attribution.photo_id ?? ''),
+          photographer_name: String(config.unsplash_attribution.photographer_name ?? ''),
+          photographer_profile_url: String(config.unsplash_attribution.photographer_profile_url ?? ''),
+          photo_page_url: String(config.unsplash_attribution.photo_page_url ?? ''),
+          download_location: String(config.unsplash_attribution.download_location ?? ''),
+        }
+      : null,
     quote_text: textBoxes
       .map((box) => String(box.text || '').trim())
       .filter(Boolean)
@@ -1042,7 +1060,10 @@ export const normalizeQuoteTemplate = (
   };
 };
 
-export const quoteTemplateToEditorConfig = (template?: Partial<QuoteTemplate> | null, fallbackText = DEFAULT_QUOTE_TEXT) => {
+export const quoteTemplateToEditorConfig = (
+  template?: Partial<QuoteTemplate> | null,
+  fallbackText = DEFAULT_QUOTE_TEXT,
+) => {
   const normalized = normalizeQuoteTemplate(template, fallbackText);
   return normalizeQuoteEditorConfig(
     {

@@ -14,6 +14,20 @@ export type QuoteImageCrop = {
   rotation: 0 | 90 | 180 | 270;
 };
 
+export type UserProfile = {
+  name: string;
+  email: string;
+  instagram_handle: string;
+};
+
+export type UnsplashImageAttribution = {
+  photo_id: string;
+  photographer_name: string;
+  photographer_profile_url: string;
+  photo_page_url: string;
+  download_location: string;
+};
+
 export type QuoteTextBox = {
   id: string;
   text: string;
@@ -33,6 +47,8 @@ export type QuoteEditorConfig = {
   activeCanvasKey: CanvasPresetKey;
   background_image_uri: string | null;
   background_image_crop: QuoteImageCrop | null;
+  background_image_source: 'camera' | 'device' | 'unsplash' | null;
+  unsplash_attribution: UnsplashImageAttribution | null;
   image_opacity: number;
   font_size: number;
   font_color: string;

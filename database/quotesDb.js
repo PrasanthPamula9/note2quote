@@ -11,6 +11,13 @@ const DB_VERSION = '1.0';
 const DB_DISPLAY_NAME = 'note2quote';
 const DB_SIZE = 200000;
 const DEFAULT_QUOTE_CATEGORY_ID = 'all-quotes';
+const DEFAULT_USER_PROFILE = {
+  name: '',
+  email: '',
+  instagram_handle: '',
+};
+const USER_PROFILE_SETTING_KEY = 'user_profile';
+const UNSPLASH_CACHE_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 const INITIAL_QUOTE_CATEGORIES = [
   { id: DEFAULT_QUOTE_CATEGORY_ID, name: 'All quotes', is_default: 1 },
   { id: 'poems', name: 'Poems', is_default: 0 },
@@ -27,6 +34,14 @@ let dbPromise = null;
  *   pinned?: number,
  *   editor_config?: import('../types/quotes').QuoteEditorConfig | null,
  * }} QuoteInput
+ */
+/**
+ * @typedef {{
+ *   cacheKey: string,
+ *   searchQuery: string,
+ *   orientation?: string | null,
+ *   photos: unknown[],
+ * }} UnsplashCacheInput
  */
 
 function generateQuoteId() {
@@ -120,6 +135,21 @@ async function getDatabase() {
       is_default INTEGER NOT NULL DEFAULT 0,
       created_at INTEGER NOT NULL,
       updated_at INTEGER NOT NULL
+    );
+  `);
+  await db.executeSql(`
+    CREATE TABLE IF NOT EXISTS app_settings (
+      setting_key TEXT PRIMARY KEY NOT NULL,
+      setting_value TEXT
+    );
+  `);
+  await db.executeSql(`
+    CREATE TABLE IF NOT EXISTS unsplash_cache (
+      cache_key TEXT PRIMARY KEY NOT NULL,
+      search_query TEXT NOT NULL,
+      orientation TEXT,
+      photos_json TEXT NOT NULL,
+      fetched_at INTEGER NOT NULL
     );
   `);
   await ensureColumnExists(db, 'quotes', 'background_image_uri', 'TEXT');
@@ -360,9 +390,120 @@ async function pinQuotes(quoteIds, pinned) {
   );
 }
 
+async function getUserProfile() {
+  const db = await getDatabase();
+  const result = getExecuteSqlResult(
+    await db.executeSql('SELECT setting_value FROM app_settings WHERE setting_key = ? LIMIT 1;', [
+      USER_PROFILE_SETTING_KEY,
+    ]),
+  );
+
+  if (!result || !result.rows || result.rows.length === 0) {
+    return { ...DEFAULT_USER_PROFILE };
+  }
+
+  const rawValue = result.rows.item(0)?.setting_value;
+  if (!rawValue) {
+    return { ...DEFAULT_USER_PROFILE };
+  }
+
+  try {
+    const parsed = JSON.parse(rawValue);
+    return {
+      name: String(parsed?.name || '').trim(),
+      email: String(parsed?.email || '').trim(),
+      instagram_handle: String(parsed?.instagram_handle || '').trim(),
+    };
+  } catch (error) {
+    return { ...DEFAULT_USER_PROFILE };
+  }
+}
+
+async function saveUserProfile(profile) {
+  const db = await getDatabase();
+  const resolvedProfile = {
+    name: String(profile?.name || '').trim(),
+    email: String(profile?.email || '').trim(),
+    instagram_handle: String(profile?.instagram_handle || '').trim(),
+  };
+
+  await db.executeSql(
+    'INSERT OR REPLACE INTO app_settings (setting_key, setting_value) VALUES (?, ?);',
+    [USER_PROFILE_SETTING_KEY, JSON.stringify(resolvedProfile)],
+  );
+
+  return resolvedProfile;
+}
+
+async function getCachedUnsplashSearch(cacheKey, maxAgeMs = UNSPLASH_CACHE_TTL_MS) {
+  const db = await getDatabase();
+  const result = getExecuteSqlResult(
+    await db.executeSql(
+      'SELECT cache_key, search_query, orientation, photos_json, fetched_at FROM unsplash_cache WHERE cache_key = ? LIMIT 1;',
+      [cacheKey],
+    ),
+  );
+
+  if (!result || !result.rows || result.rows.length === 0) {
+    return null;
+  }
+
+  const row = result.rows.item(0);
+  if (!row) {
+    return null;
+  }
+
+  const fetchedAt = Number(row.fetched_at || 0);
+  const age = Date.now() - fetchedAt;
+  const isFresh = Number.isFinite(fetchedAt) && age <= maxAgeMs;
+
+  try {
+    return {
+      cache_key: String(row.cache_key || ''),
+      search_query: String(row.search_query || ''),
+      orientation: row.orientation ? String(row.orientation) : null,
+      fetched_at: fetchedAt,
+      isFresh,
+      photos: JSON.parse(row.photos_json || '[]'),
+    };
+  } catch (error) {
+    return null;
+  }
+}
+
+/**
+ * @param {UnsplashCacheInput} input
+ */
+async function saveUnsplashSearchCache({ cacheKey, searchQuery, orientation = null, photos }) {
+  const db = await getDatabase();
+  const now = Date.now();
+  await db.executeSql(
+    'INSERT OR REPLACE INTO unsplash_cache (cache_key, search_query, orientation, photos_json, fetched_at) VALUES (?, ?, ?, ?, ?);',
+    [
+      cacheKey,
+      String(searchQuery || '').trim(),
+      orientation,
+      JSON.stringify(Array.isArray(photos) ? photos.slice(0, 30) : []),
+      now,
+    ],
+  );
+
+  return {
+    cache_key: cacheKey,
+    search_query: String(searchQuery || '').trim(),
+    orientation,
+    fetched_at: now,
+    photos: Array.isArray(photos) ? photos.slice(0, 30) : [],
+  };
+}
+
 module.exports = {
   DEFAULT_QUOTE_CATEGORY_ID,
   getDatabase,
+  getUserProfile,
+  saveUserProfile,
+  getCachedUnsplashSearch,
+  saveUnsplashSearchCache,
   getQuotes,
   getQuoteCategories,
   createQuote,

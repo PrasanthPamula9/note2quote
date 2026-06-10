@@ -12,10 +12,13 @@ import QuotesView from '../views/QuotesView';
 import { Quote } from '../../types/quotes';
 import useQuotesStore from '../../hooks/useQuotes';
 import { DEFAULT_QUOTE_CATEGORY_ID } from '../../database/quotesDb';
+import { getUserProfile, saveUserProfile } from '../../database/quotesDb';
 import {
   DEFAULT_QUOTE_TEXT,
+  DEFAULT_AUTHOR_TEXT,
   getRandomColorQuoteEditorConfig,
 } from '../../utils/quoteConfig';
+import type { UserProfile } from '../../types/quotes';
 
 type QuoteDraftRequest = {
   id: number;
@@ -53,9 +56,26 @@ export default function QuotesContainer({
   const [createCategoryVisible, setCreateCategoryVisible] = useState(false);
   const [newCategoryName, setNewCategoryName] = useState('');
   const [galleryRefreshKey, setGalleryRefreshKey] = useState(0);
+  const [userProfile, setUserProfile] = useState<UserProfile>({ name: '', email: '', instagram_handle: '' });
+  const [userProfileLoaded, setUserProfileLoaded] = useState(false);
   const handledDraftId = useRef<number | null>(null);
   const enterDuration = 300;
   const exitDuration = 240;
+
+  const resolveDefaultAuthorName = React.useCallback((profile: UserProfile) => {
+    const handle = profile.instagram_handle.trim();
+    if (handle) {
+      const normalizedHandle = handle.startsWith('@') ? handle : `@${handle}`;
+      return `- ${normalizedHandle}`;
+    }
+
+    const name = profile.name.trim();
+    if (name) {
+      return `- ${name}`;
+    }
+
+    return DEFAULT_AUTHOR_TEXT;
+  }, []);
 
   const visibleQuotes = useMemo(() => {
     if (activeCategoryId === 'all') {
@@ -171,13 +191,35 @@ export default function QuotesContainer({
 
   const handleAddQuote = () => {
     setSelectedQuote(null);
-    setDraftEditorConfig(getRandomColorQuoteEditorConfig(DEFAULT_QUOTE_TEXT));
+    setDraftEditorConfig(getRandomColorQuoteEditorConfig(DEFAULT_QUOTE_TEXT, resolveDefaultAuthorName(userProfile)));
     setEditorSessionKey(`new-${Date.now()}`);
     setTransitionDirection('forward');
     setViewState('editor');
   };
 
   useEffect(() => {
+    let isMounted = true;
+
+    const loadUserProfile = async () => {
+      const profile = await getUserProfile();
+      if (isMounted) {
+        setUserProfile(profile);
+        setUserProfileLoaded(true);
+      }
+    };
+
+    loadUserProfile();
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!userProfileLoaded) {
+      return;
+    }
+
     const draftText = draftQuoteRequest?.text.trim() ?? '';
     if (!draftQuoteRequest || !draftText || handledDraftId.current === draftQuoteRequest.id) {
       return;
@@ -186,7 +228,8 @@ export default function QuotesContainer({
     handledDraftId.current = draftQuoteRequest.id;
 
     const openDraftQuote = async () => {
-      const editorConfig = getRandomColorQuoteEditorConfig(draftText);
+      const authorName = resolveDefaultAuthorName(userProfile);
+      const editorConfigWithAuthor = getRandomColorQuoteEditorConfig(draftText, authorName);
       const resolvedCategoryId = activeCategoryId === 'all'
         ? DEFAULT_QUOTE_CATEGORY_ID
         : activeCategoryId;
@@ -194,7 +237,7 @@ export default function QuotesContainer({
         quote_text: draftText,
         background_image_uri: null,
         quote_category_id: resolvedCategoryId,
-        editor_config: editorConfig,
+        editor_config: editorConfigWithAuthor,
       });
       setSelectedQuote(savedQuote);
       setDraftEditorConfig(null);
@@ -205,7 +248,15 @@ export default function QuotesContainer({
     };
 
     openDraftQuote();
-  }, [activeCategoryId, createQuote, draftQuoteRequest, onDraftConsumed]);
+  }, [
+    activeCategoryId,
+    createQuote,
+    draftQuoteRequest,
+    onDraftConsumed,
+    resolveDefaultAuthorName,
+    userProfile,
+    userProfileLoaded,
+  ]);
 
   useEffect(() => {
     if (!quoteCategories.length) {
@@ -226,6 +277,8 @@ export default function QuotesContainer({
       activeCanvasKey,
       background_image_uri,
       background_image_crop,
+      background_image_source,
+      unsplash_attribution,
       image_opacity,
       font_size,
       font_color,
@@ -250,6 +303,8 @@ export default function QuotesContainer({
       activeCanvasKey,
       background_image_uri,
       background_image_crop,
+      background_image_source,
+      unsplash_attribution,
       image_opacity,
       font_size,
       font_color,
@@ -363,6 +418,11 @@ export default function QuotesContainer({
               quotes={visibleQuotes}
               categories={quoteCategories}
               activeCategoryId={activeCategoryId}
+              userProfile={userProfile}
+              onUserProfileSave={async (profile) => {
+                const savedProfile = await saveUserProfile(profile);
+                setUserProfile(savedProfile);
+              }}
               selectionMode={selectionMode}
               selectedQuoteIds={selectedQuoteIds}
               onCategoryChange={(categoryId) => {

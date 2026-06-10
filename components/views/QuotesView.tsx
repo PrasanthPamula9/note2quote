@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
-import { View, Text, StyleSheet, useWindowDimensions, Modal, FlatList, Pressable, ScrollView, Alert, TextInput, Platform, PermissionsAndroid, Image, ImageBackground, ActivityIndicator, Animated, Easing } from 'react-native';
+import { View, Text, StyleSheet, useWindowDimensions, Modal, FlatList, Pressable, ScrollView, Alert, TextInput, Platform, PermissionsAndroid, Image, ImageBackground, ActivityIndicator, Animated, Easing, Linking } from 'react-native';
 import { Canvas, Rect, Path, Image as SkiaImage, Group, Picture, useImage, Paragraph, Skia, TextAlign, FontWeight, FontSlant, useCanvasRef, ImageFormat, fitbox } from '@shopify/react-native-skia';
 import { Appbar, Icon } from 'react-native-paper'
 import {launchImageLibrary, launchCamera} from 'react-native-image-picker';
@@ -8,7 +8,8 @@ import MaterialIcons from '@react-native-vector-icons/material-design-icons';
 import ColorPickerComponent, { HueSlider, Panel1 } from 'reanimated-color-picker';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import QuoteExportView from './QuoteExportView';
-import { QuoteEditorConfig, CanvasPresetKey, QuoteTemplate, QuoteTextBox } from '../../types/quotes';
+import UnsplashImagePickerModal from './UnsplashImagePickerModal';
+import { QuoteEditorConfig, CanvasPresetKey, QuoteTemplate, QuoteTextBox, UnsplashImageAttribution } from '../../types/quotes';
 import { DEFAULT_FONT_FAMILY, QUOTE_FONT_CATALOG, type FontCatalogEntry } from '../../utils/fontCatalog';
 import { BUNDLED_FONT_FAMILIES, type BundledFontFamily } from '../../utils/bundledFonts';
 import { useBundledFontProvider } from '../../contexts/BundledFontProviderContext';
@@ -29,6 +30,7 @@ import {
   normalizeTextBoxes,
   quoteTemplateToEditorConfig,
 } from '../../utils/quoteConfig';
+import { getUnsplashPhotoSourceUrl, trackUnsplashDownload, type UnsplashPhoto, type UnsplashSearchOrientation } from '../../utils/unsplash';
 const INLINE_EDITOR_YELLOW = '#ffc107';
 const INLINE_EDITOR_DARK = '#433e3e';
 // ─── Canvas size presets ─────────────────────────────────────────────────────
@@ -48,6 +50,9 @@ type PendingCropImage = {
   width: number;
   height: number;
   label: string;
+  source?: 'camera' | 'device' | 'unsplash';
+  isNewSelection?: boolean;
+  unsplashAttribution?: UnsplashImageAttribution | null;
 };
 
 type BackgroundImageCrop = {
@@ -245,6 +250,7 @@ type InlineFeaturePanelProps = {
   onImageOpacityChange: (value: number) => void;
   onTextPositionXChange: (value: number) => void;
   onTextPositionYChange: (value: number) => void;
+  onUnsplashPress: () => void;
 };
 
 const FontPreviewSample = React.memo(function FontPreviewSample({
@@ -582,6 +588,7 @@ const InlineFeaturePanel = React.memo(function InlineFeaturePanel({
   onImageOpacityChange,
   onTextPositionXChange,
   onTextPositionYChange,
+  onUnsplashPress,
 }: InlineFeaturePanelProps) {
   const { width: screenWidth, height: screenHeight } = useWindowDimensions();
   const fontStripRef = useRef<FlatList<(typeof fontOptions)[number]> | null>(null);
@@ -670,6 +677,8 @@ const InlineFeaturePanel = React.memo(function InlineFeaturePanel({
                       width: asset.width ?? 0,
                       height: asset.height ?? 0,
                       label: 'Camera',
+                      source: 'camera',
+                      isNewSelection: true,
                     });
                     onClose();
                   }
@@ -690,6 +699,8 @@ const InlineFeaturePanel = React.memo(function InlineFeaturePanel({
                       width: asset.width ?? 0,
                       height: asset.height ?? 0,
                       label: 'Device',
+                      source: 'device',
+                      isNewSelection: true,
                     });
                     onClose();
                   }
@@ -702,14 +713,13 @@ const InlineFeaturePanel = React.memo(function InlineFeaturePanel({
             <Pressable
               style={styles.featureOptionCard}
               onPress={() => {
-                Alert.alert('Coming Soon', 'Unsplash integration is coming soon!');
-                onClose();
+                onUnsplashPress();
               }}
             >
               <Icon source="image-search" size={24} color="#222" />
               <Text style={styles.featureOptionText}>Unsplash</Text>
-              </Pressable>
-            </View>
+            </Pressable>
+          </View>
         </InlineFeatureShell>
       );
     case 'BackgroundColor':
@@ -1042,6 +1052,12 @@ export default function QuotesView({
   const [backgroundImageUri, setBackgroundImageUri] = useState<string | null>(
     initialEditorConfig?.background_image_uri ?? initialBackgroundImageUri ?? null,
   );
+  const [backgroundImageSource, setBackgroundImageSource] = useState<'camera' | 'device' | 'unsplash' | null>(
+    initialEditorConfig?.background_image_source ?? (initialEditorConfig?.unsplash_attribution ? 'unsplash' : null),
+  );
+  const [backgroundImageAttribution, setBackgroundImageAttribution] = useState<UnsplashImageAttribution | null>(
+    initialEditorConfig?.unsplash_attribution ?? null,
+  );
   const [backgroundImageCrop, setBackgroundImageCrop] = useState<BackgroundImageCrop | null>(
     initialEditorConfig?.background_image_crop ?? DEFAULT_EDITOR_CONFIG.background_image_crop,
   );
@@ -1059,6 +1075,7 @@ export default function QuotesView({
   const [settingsContentWidth, setSettingsContentWidth] = useState(0);
   const [templatesModalVisible, setTemplatesModalVisible] = useState(false);
   const [cropModalVisible, setCropModalVisible] = useState(false);
+  const [unsplashModalVisible, setUnsplashModalVisible] = useState(false);
   const [pendingCropImage, setPendingCropImage] = useState<PendingCropImage | null>(null);
   const [pendingCanvasKey, setPendingCanvasKey] = useState<CanvasPresetKey | null>(null);
   const [cropZoom, setCropZoom] = useState(1);
@@ -1137,6 +1154,8 @@ export default function QuotesView({
     setActiveCanvasKey(config.activeCanvasKey);
     setBackgroundImageUri(config.background_image_uri ?? initialBackgroundImageUri ?? null);
     setBackgroundImageCrop(config.background_image_crop ?? null);
+    setBackgroundImageSource(config.background_image_source ?? (config.unsplash_attribution ? 'unsplash' : null));
+    setBackgroundImageAttribution(config.unsplash_attribution ?? null);
     setImageOpacity(config.image_opacity);
     setFontSize(config.font_size);
     setFontColor(config.font_color);
@@ -1156,6 +1175,8 @@ export default function QuotesView({
   useEffect(() => {
     if (!backgroundImageUri) {
       setBackgroundImageCrop(null);
+      setBackgroundImageSource(null);
+      setBackgroundImageAttribution(null);
     }
   }, [backgroundImageUri]);
 
@@ -1734,6 +1755,8 @@ export default function QuotesView({
       activeCanvasKey,
       background_image_uri: backgroundImageUri,
       background_image_crop: backgroundImageCrop,
+      background_image_source: backgroundImageSource,
+      unsplash_attribution: backgroundImageAttribution,
       image_opacity: imageOpacity,
       font_size: selectedTextBox?.font_size ?? fontSize,
       font_color: selectedTextBox?.font_color ?? fontColor,
@@ -1751,6 +1774,8 @@ export default function QuotesView({
       activeCanvasKey,
       backgroundImageUri,
       backgroundImageCrop,
+      backgroundImageSource,
+      backgroundImageAttribution,
       imageOpacity,
       selectedTextBox?.font_size,
       selectedTextBox?.font_color,
@@ -1826,6 +1851,18 @@ export default function QuotesView({
     setCroppingImage(false);
   };
 
+  const resolveUnsplashOrientation = (): UnsplashSearchOrientation => {
+    if (activeCanvasKey === 'instagram_post_landscape') {
+      return 'landscape';
+    }
+
+    if (activeCanvasKey === 'instagram_post_square') {
+      return 'squarish';
+    }
+
+    return 'portrait';
+  };
+
   const openImageCropEditor = async (image: PendingCropImage) => {
     let resolvedImage = image;
 
@@ -1858,6 +1895,38 @@ export default function QuotesView({
     setCropModalVisible(true);
   };
 
+  const openUnsplashPicker = () => {
+    setUnsplashModalVisible(true);
+  };
+
+  const handleUnsplashPhotoSelect = async (photo: UnsplashPhoto) => {
+    if (!photo.links.download_location) {
+      throw new Error('This photo does not provide a download location.');
+    }
+
+    await trackUnsplashDownload(photo.links.download_location);
+
+    const attribution: UnsplashImageAttribution = {
+      photo_id: photo.id,
+      photographer_name: photo.user.name,
+      photographer_profile_url: `${photo.user.links.html}?utm_source=note2quote&utm_medium=referral`,
+      photo_page_url: `${photo.links.html}?utm_source=note2quote&utm_medium=referral`,
+      download_location: photo.links.download_location,
+    };
+
+    setUnsplashModalVisible(false);
+
+    await openImageCropEditor({
+      uri: getUnsplashPhotoSourceUrl(photo, 1920),
+      width: photo.width ?? 0,
+      height: photo.height ?? 0,
+      label: 'Unsplash',
+      source: 'unsplash',
+      isNewSelection: true,
+      unsplashAttribution: attribution,
+    });
+  };
+
   const handleCanvasSizeChange = (nextCanvasKey: CanvasPresetKey) => {
     if (nextCanvasKey === activeCanvasKey) {
       return;
@@ -1874,6 +1943,9 @@ export default function QuotesView({
       width: 0,
       height: 0,
       label: 'Background image',
+      source: backgroundImageSource ?? undefined,
+      isNewSelection: false,
+      unsplashAttribution: backgroundImageAttribution,
     }).catch((error) => {
       console.warn('Could not reopen crop editor for canvas resize', error);
       setPendingCanvasKey(null);
@@ -1908,6 +1980,11 @@ export default function QuotesView({
       }
       setBackgroundImageUri(pendingCropImage.uri);
       setBackgroundImageCrop(crop);
+      setBackgroundImageSource(pendingCropImage.source ?? null);
+      setBackgroundImageAttribution(pendingCropImage.unsplashAttribution ?? null);
+      if (pendingCropImage.isNewSelection) {
+        setBgColor('#000000');
+      }
       closeCropModal();
     } catch (error) {
       console.warn('Crop failed', error);
@@ -1927,7 +2004,13 @@ export default function QuotesView({
 
   const renderCanvasContent = (metrics: typeof layoutTextBoxMetrics, renderWidth: number, renderHeight: number) => (
     <>
-      <Rect x={0} y={0} width={renderWidth} height={renderHeight} color={bgColor} />
+      <Rect
+        x={0}
+        y={0}
+        width={renderWidth}
+        height={renderHeight}
+        color={bgColor}
+      />
       {backgroundPicture ? <Picture picture={backgroundPicture} /> : null}
       {textBoxes.map((box, index) => {
         const metric = metrics[index];
@@ -2143,6 +2226,7 @@ export default function QuotesView({
         onImageOpacityChange={HandleOpactyChange}
         onTextPositionXChange={(value) => setTextX(value / nativeCanvasWidth)}
         onTextPositionYChange={(value) => setTextY(value / nativeCanvasHeight)}
+        onUnsplashPress={openUnsplashPicker}
       />
     );
   };
@@ -2404,6 +2488,22 @@ export default function QuotesView({
             },
           ]}
         >
+            {backgroundImageAttribution ? (
+              <View style={styles.unsplashCreditBanner}>
+                <Text style={styles.unsplashCreditText} numberOfLines={1}>
+                  Photo by {backgroundImageAttribution.photographer_name} on Unsplash.
+                </Text>
+                <Text style={styles.unsplashCreditSeparator}>|</Text>
+                <Pressable
+                  style={styles.unsplashCreditButton}
+                  onPress={() => {
+                    void Linking.openURL(backgroundImageAttribution.photographer_profile_url);
+                  }}
+                >
+                  <Text style={styles.unsplashCreditButtonText}>View profile</Text>
+                </Pressable>
+              </View>
+            ) : null}
             {currentFeature && currentFeature !== 'TextEdit' ? (
               <View style={styles.featurePanelHost}>
                 {renderInlineFeatureContent()}
@@ -2468,18 +2568,26 @@ export default function QuotesView({
                   </ScrollView>
                 </View>
                 <View style={[styles.templatesZone, { paddingBottom: templatesZonePaddingBottom }]}>
+                  {/* Templates button temporarily disabled for the next version.
                   <Pressable
                     style={styles.templatesButton}
                     onPress={() => setTemplatesModalVisible(true)}
                   >
                     <Text style={styles.templatesButtonText}>Templates</Text>
                   </Pressable>
+                  */}
                 </View>
               </>
             )}
           </View>
       </ImageBackground>
       {renderImageCropModal()}
+      <UnsplashImagePickerModal
+        visible={unsplashModalVisible}
+        orientation={resolveUnsplashOrientation()}
+        onClose={() => setUnsplashModalVisible(false)}
+        onSelect={handleUnsplashPhotoSelect}
+      />
       <Modal
         visible={modalVisible && currentFeature === 'TextEdit'}
         animationType="slide"
@@ -2834,7 +2942,7 @@ const styles = StyleSheet.create({
     borderTopLeftRadius: 0,
     borderTopRightRadius: 0,
     borderRadius: 0,
-    backgroundColor: '#fff',
+    backgroundColor: 'transparent',
     paddingHorizontal: 0,
     paddingTop: 0,
     paddingBottom: 0,
@@ -3883,5 +3991,35 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
     color: '#fff',
+  },
+  unsplashCreditBanner: {
+    marginHorizontal: 16,
+    marginBottom: 6,
+    paddingHorizontal: 2,
+    paddingVertical: 0,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  unsplashCreditText: {
+    flex: 1,
+    minWidth: 0,
+    fontSize: 12,
+    fontWeight: '500',
+    color: '#444',
+  },
+  unsplashCreditSeparator: {
+    fontSize: 12,
+    color: '#888',
+  },
+  unsplashCreditButton: {
+    paddingHorizontal: 0,
+    paddingVertical: 0,
+  },
+  unsplashCreditButtonText: {
+    color: '#1a73e8',
+    fontSize: 12,
+    fontWeight: '600',
+    textDecorationLine: 'underline',
   },
 })
