@@ -303,8 +303,7 @@ export default function QuotesGalleryView({
         >
           <Pressable
             style={styles.categoryAddButton}
-            onPress={onAddQuote}
-            onLongPress={onNewCategorySelected}
+            onPress={onNewCategorySelected}
             hitSlop={8}
           >
             <MaterialIcons name="plus" size={18} color="#433e3e" />
@@ -585,7 +584,8 @@ function QuoteGalleryPreview({
   previewAspectRatio: number;
 }) {
   const config = normalizeQuoteEditorConfig(quote.editor_config);
-  const previewImageUri = getQuotePreviewImageUri(quote.id, quote.updated_at);
+  const previewImageUri = getQuotePreviewImageUri(quote.id);
+  const previewImageUriWithCacheKey = `${previewImageUri}?t=${quote.updated_at}`;
   const backgroundImageUri = quote.background_image_uri || config.background_image_uri;
   const backgroundSource = backgroundImageUri ? { uri: backgroundImageUri } : null;
   const previewText = config.quote_text?.trim() || quote.quote_text || 'Quote';
@@ -593,7 +593,12 @@ function QuoteGalleryPreview({
   const previewTextColor = getReadableTextColor(config.bg_color, config.font_color);
   const previewBackgroundColor = config.bg_color || '#000000';
   const [previewFailed, setPreviewFailed] = React.useState(false);
-  const showSnapshot = Boolean(previewImageUri) && !previewFailed;
+
+  React.useEffect(() => {
+    setPreviewFailed(false);
+  }, [previewImageUriWithCacheKey]);
+
+  const showSnapshot = Boolean(previewImageUriWithCacheKey) && !previewFailed;
 
   return (
     <View
@@ -608,7 +613,7 @@ function QuoteGalleryPreview({
     >
       {showSnapshot ? (
         <ImageBackground
-          source={{ uri: previewImageUri }}
+          source={{ uri: previewImageUriWithCacheKey }}
           style={styles.previewImage}
           imageStyle={[styles.previewImageMask, { borderRadius: cardRadius }]}
           resizeMode="cover"
@@ -1075,7 +1080,7 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     bottom: 0,
-    backgroundColor: 'transparent',
+    backgroundColor: 'white',
     borderTopWidth: 1,
     borderTopColor: 'rgba(232, 232, 232, 0.72)',
     paddingTop: 10,

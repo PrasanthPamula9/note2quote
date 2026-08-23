@@ -1,0 +1,6 @@
+{
+  "primary_provider": "ollama",
+  "ollama_base_url": "http://localhost:11434",
+  "model": "",
+  "max_output_tokens": 64000
+}

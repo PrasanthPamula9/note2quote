@@ -158,6 +158,45 @@ const LoadingQuoteEditor = React.memo(function LoadingQuoteEditor() {
   );
 });
 
+const CanvasLoadingSkeleton = React.memo(function CanvasLoadingSkeleton() {
+  const pulse = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    const animation = Animated.loop(
+      Animated.sequence([
+        Animated.timing(pulse, {
+          toValue: 1,
+          duration: 750,
+          easing: Easing.inOut(Easing.ease),
+          useNativeDriver: true,
+        }),
+        Animated.timing(pulse, {
+          toValue: 0,
+          duration: 750,
+          easing: Easing.inOut(Easing.ease),
+          useNativeDriver: true,
+        }),
+      ]),
+    );
+
+    animation.start();
+    return () => animation.stop();
+  }, [pulse]);
+
+  const pulseStyle = {
+    opacity: pulse.interpolate({ inputRange: [0, 1], outputRange: [0.4, 0.9] }),
+  } as const;
+
+  return (
+    <Animated.View style={[styles.canvasSkeletonOverlay, pulseStyle]} pointerEvents="none">
+      <View style={styles.canvasSkeletonBackground} />
+      <Animated.View style={[styles.canvasSkeletonLine, pulseStyle]} />
+      <Animated.View style={[styles.canvasSkeletonLine, styles.canvasSkeletonLineShort, pulseStyle]} />
+      <Animated.View style={[styles.canvasSkeletonLine, styles.canvasSkeletonLineSmaller, pulseStyle]} />
+    </Animated.View>
+  );
+});
+
 const getNextCropRotation = (rotation: CropRotation): CropRotation => {
   switch (rotation) {
     case 0:
@@ -180,24 +219,62 @@ const resolveCropRect = (
   offsetY: number,
   rotation: CropRotation,
 ) => {
-  const targetAspectRatio = rotation === 90 || rotation === 270 ? 1 / aspectRatio : aspectRatio;
-  const imageAspectRatio = sourceWidth / sourceHeight;
+  const normalizedRotation = normalizeCropRotation(rotation);
+  const isQuarterTurn = normalizedRotation === 90 || normalizedRotation === 270;
+  const rotatedSourceWidth = isQuarterTurn ? sourceHeight : sourceWidth;
+  const rotatedSourceHeight = isQuarterTurn ? sourceWidth : sourceHeight;
+  const imageAspectRatio = rotatedSourceWidth / rotatedSourceHeight;
   const baseCropWidth =
-    imageAspectRatio > targetAspectRatio ? sourceHeight * targetAspectRatio : sourceWidth;
+    imageAspectRatio > aspectRatio ? rotatedSourceHeight * aspectRatio : rotatedSourceWidth;
   const baseCropHeight =
-    imageAspectRatio > targetAspectRatio ? sourceHeight : sourceWidth / targetAspectRatio;
+    imageAspectRatio > aspectRatio ? rotatedSourceHeight : rotatedSourceWidth / aspectRatio;
 
-  const cropWidth = Math.max(1, Math.round(baseCropWidth / zoom));
-  const cropHeight = Math.max(1, Math.round(baseCropHeight / zoom));
-  const maxCropX = Math.max(0, sourceWidth - cropWidth);
-  const maxCropY = Math.max(0, sourceHeight - cropHeight);
+  const cropWidthRotated = Math.max(1, Math.round(baseCropWidth / zoom));
+  const cropHeightRotated = Math.max(1, Math.round(baseCropHeight / zoom));
+  const maxCropXRotated = Math.max(0, rotatedSourceWidth - cropWidthRotated);
+  const maxCropYRotated = Math.max(0, rotatedSourceHeight - cropHeightRotated);
+  const cropXRotated = Math.max(0, Math.min(maxCropXRotated, Math.round(maxCropXRotated * offsetX)));
+  const cropYRotated = Math.max(0, Math.min(maxCropYRotated, Math.round(maxCropYRotated * offsetY)));
+
+  const clampX = (value: number, width: number) => Math.max(0, Math.min(sourceWidth - width, value));
+  const clampY = (value: number, height: number) => Math.max(0, Math.min(sourceHeight - height, value));
+
+  if (normalizedRotation === 0) {
+    return {
+      x: cropXRotated,
+      y: cropYRotated,
+      width: cropWidthRotated,
+      height: cropHeightRotated,
+      rotation: normalizedRotation,
+    };
+  }
+
+  if (normalizedRotation === 90) {
+    return {
+      x: clampX(sourceWidth - (cropYRotated + cropHeightRotated), cropHeightRotated),
+      y: clampY(cropXRotated, cropWidthRotated),
+      width: cropHeightRotated,
+      height: cropWidthRotated,
+      rotation: normalizedRotation,
+    };
+  }
+
+  if (normalizedRotation === 180) {
+    return {
+      x: clampX(sourceWidth - (cropXRotated + cropWidthRotated), cropWidthRotated),
+      y: clampY(sourceHeight - (cropYRotated + cropHeightRotated), cropHeightRotated),
+      width: cropWidthRotated,
+      height: cropHeightRotated,
+      rotation: normalizedRotation,
+    };
+  }
 
   return {
-    x: Math.max(0, Math.min(maxCropX, Math.round(maxCropX * offsetX))),
-    y: Math.max(0, Math.min(maxCropY, Math.round(maxCropY * offsetY))),
-    width: cropWidth,
-    height: cropHeight,
-    rotation,
+    x: clampX(cropYRotated, cropHeightRotated),
+    y: clampY(sourceHeight - (cropXRotated + cropWidthRotated), cropWidthRotated),
+    width: cropHeightRotated,
+    height: cropWidthRotated,
+    rotation: normalizedRotation,
   };
 };
 
@@ -205,14 +282,14 @@ type InlineFeatureKey =
   | 'BackgroundImage'
   | 'BackgroundColor'
   | 'FontColor'
-  | 'ImageOpacity'
-  | 'FontSize'
   | 'FontFamily'
-  | 'CanvasSize'
   | 'FontShadow'
+  | 'FontSize'
   | 'FontWeight'
   | 'BoxWidth'
-  | 'TextPosition';
+  | 'TextPosition'
+  | 'ImageOpacity'
+  | 'CanvasSize';
 
 type InlineFeaturePanelProps = {
   feature: InlineFeatureKey;
@@ -376,6 +453,70 @@ const ImageCropModal = React.memo(function ImageCropModal({
 }) {
   const { width: screenWidth, height: screenHeight } = useWindowDimensions();
 
+  // Crop image loading skeleton state (1s minimum)
+  const [isCropImageLoading, setIsCropImageLoading] = useState<boolean>(true);
+  const [showCropSkeleton, setShowCropSkeleton] = useState<boolean>(false);
+  const CROP_SKELETON_MIN_MS = 1000;
+  const cropSkeletonStartRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    // When image changes, start showing skeleton
+    setIsCropImageLoading(true);
+    cropSkeletonStartRef.current = Date.now();
+    setShowCropSkeleton(true);
+  }, [image?.uri]);
+
+  useEffect(() => {
+    if (isCropImageLoading) {
+      return;
+    }
+
+    const start = cropSkeletonStartRef.current;
+    if (!start) {
+      setShowCropSkeleton(false);
+      return;
+    }
+
+    const elapsed = Date.now() - start;
+    if (elapsed >= CROP_SKELETON_MIN_MS) {
+      setShowCropSkeleton(false);
+      cropSkeletonStartRef.current = null;
+    } else {
+      const remaining = CROP_SKELETON_MIN_MS - elapsed;
+      const t = setTimeout(() => {
+        setShowCropSkeleton(false);
+        cropSkeletonStartRef.current = null;
+      }, remaining);
+      return () => clearTimeout(t);
+    }
+  }, [isCropImageLoading]);
+
+  const CropLoadingSkeleton = React.memo(function CropLoadingSkeleton() {
+    const pulse = useRef(new Animated.Value(0)).current;
+
+    useEffect(() => {
+      const animation = Animated.loop(
+        Animated.sequence([
+          Animated.timing(pulse, { toValue: 1, duration: 500, easing: Easing.inOut(Easing.ease), useNativeDriver: true }),
+          Animated.timing(pulse, { toValue: 0, duration: 500, easing: Easing.inOut(Easing.ease), useNativeDriver: true }),
+        ]),
+      );
+      animation.start();
+      return () => animation.stop();
+    }, [pulse]);
+
+    const pulseStyle = { opacity: pulse.interpolate({ inputRange: [0, 1], outputRange: [0.4, 0.95] }) } as const;
+
+    return (
+      <Animated.View style={[styles.canvasSkeletonOverlay, pulseStyle]} pointerEvents="none">
+        <View style={styles.canvasSkeletonBackground} />
+        <Animated.View style={[styles.canvasSkeletonLine, pulseStyle]} />
+        <Animated.View style={[styles.canvasSkeletonLine, styles.canvasSkeletonLineShort, pulseStyle]} />
+        <Animated.View style={[styles.canvasSkeletonLine, styles.canvasSkeletonLineSmaller, pulseStyle]} />
+      </Animated.View>
+    );
+  });
+
   if (!visible || !image) {
     return null;
   }
@@ -387,6 +528,8 @@ const ImageCropModal = React.memo(function ImageCropModal({
   const baseImageScale = Math.min(previewWidth / rotatedImageWidth, previewHeight / rotatedImageHeight);
   const imageDisplayWidth = rotatedImageWidth * baseImageScale * zoom;
   const imageDisplayHeight = rotatedImageHeight * baseImageScale * zoom;
+  const sourceDisplayWidth = image.width * baseImageScale * zoom;
+  const sourceDisplayHeight = image.height * baseImageScale * zoom;
   const imageDisplayLeft = (previewWidth - imageDisplayWidth) / 2;
   const imageDisplayTop = (previewHeight - imageDisplayHeight) / 2;
   const rotatedAspectRatio = rotatedImageWidth / rotatedImageHeight;
@@ -417,26 +560,35 @@ const ImageCropModal = React.memo(function ImageCropModal({
           </View>
 
           <View style={[styles.cropPreviewFrame, { width: previewWidth, height: previewHeight }]}>
-            <ImageBackground
-              source={{ uri: image.uri }}
-              style={[
-                {
+            <View
+              style={{
+                position: 'absolute',
+                left: imageDisplayLeft,
+                top: imageDisplayTop,
+                width: imageDisplayWidth,
+                height: imageDisplayHeight,
+                transform: [{ translateX: previewTranslateX }, { translateY: previewTranslateY }],
+              }}
+            >
+              <View
+                style={{
                   position: 'absolute',
-                  left: imageDisplayLeft,
-                  top: imageDisplayTop,
-                  width: imageDisplayWidth,
-                  height: imageDisplayHeight,
-                },
-                {
-                  transform: [
-                    { translateX: previewTranslateX },
-                    { translateY: previewTranslateY },
-                    { rotate: `${rotation}deg` },
-                  ],
-                },
-              ]}
-              imageStyle={styles.cropPreviewFallbackImage}
-            />
+                  left: (imageDisplayWidth - sourceDisplayWidth) / 2,
+                  top: (imageDisplayHeight - sourceDisplayHeight) / 2,
+                  width: sourceDisplayWidth,
+                  height: sourceDisplayHeight,
+                  transform: [{ rotate: `${rotation}deg` }],
+                }}
+              >
+                <Image
+                  source={{ uri: image.uri }}
+                  onLoadStart={() => setIsCropImageLoading(true)}
+                  onLoadEnd={() => setIsCropImageLoading(false)}
+                  style={[styles.cropPreviewImage, { width: sourceDisplayWidth, height: sourceDisplayHeight }]}
+                  resizeMode="contain"
+                />
+              </View>
+            </View>
             <View style={[styles.cropPreviewMask, { top: 0, left: 0, right: 0, height: cropBoxTop }]} pointerEvents="none" />
             <View
               style={[
@@ -486,6 +638,7 @@ const ImageCropModal = React.memo(function ImageCropModal({
               ]}
               pointerEvents="none"
             />
+            {showCropSkeleton ? <CropLoadingSkeleton /> : null}
           </View>
 
           <View style={styles.cropControlGroup}>
@@ -500,6 +653,7 @@ const ImageCropModal = React.memo(function ImageCropModal({
               maximumTrackTintColor="#433e3e"
               thumbTintColor="#ffc107"
               onValueChange={onZoomChange}
+              onSlidingComplete={onZoomChange}
             />
           </View>
 
@@ -516,6 +670,7 @@ const ImageCropModal = React.memo(function ImageCropModal({
                 maximumTrackTintColor="#433e3e"
                 thumbTintColor="#ffc107"
                 onValueChange={onOffsetXChange}
+                onSlidingComplete={onOffsetXChange}
               />
             </View>
             <View style={styles.cropControlHalf}>
@@ -530,6 +685,7 @@ const ImageCropModal = React.memo(function ImageCropModal({
                 maximumTrackTintColor="#433e3e"
                 thumbTintColor="#ffc107"
                 onValueChange={onOffsetYChange}
+                onSlidingComplete={onOffsetYChange}
               />
             </View>
           </View>
@@ -1056,6 +1212,9 @@ export default function QuotesView({
   const [backgroundImageUri, setBackgroundImageUri] = useState<string | null>(
     initialEditorConfig?.background_image_uri ?? initialBackgroundImageUri ?? null,
   );
+  const [originalBackgroundImageUri, setOriginalBackgroundImageUri] = useState<string | null>(
+    initialEditorConfig?.background_image_uri ?? initialBackgroundImageUri ?? null,
+  );
   const [backgroundImageSource, setBackgroundImageSource] = useState<'camera' | 'device' | 'unsplash' | null>(
     initialEditorConfig?.background_image_source ?? (initialEditorConfig?.unsplash_attribution ? 'unsplash' : null),
   );
@@ -1066,7 +1225,7 @@ export default function QuotesView({
     initialEditorConfig?.background_image_crop ?? DEFAULT_EDITOR_CONFIG.background_image_crop,
   );
   const [modalVisible, setModalVisible] = useState(false);
-  const [currentFeature, setCurrentFeature] = useState<string | null>(null);
+  const [currentFeature, setCurrentFeature] = useState<InlineFeatureKey | 'TextEdit' | null>(null);
   const [exportModalVisible, setExportModalVisible] = useState(false);
   const [exportFormat, setExportFormat] = useState<ExportFormat>('png');
   const [exportMenuVisible, setExportMenuVisible] = useState(false);
@@ -1158,7 +1317,9 @@ export default function QuotesView({
   useEffect(() => {
     const config = initialEditorConfig ?? DEFAULT_EDITOR_CONFIG;
     setActiveCanvasKey(config.activeCanvasKey);
-    setBackgroundImageUri(config.background_image_uri ?? initialBackgroundImageUri ?? null);
+    const initialUri = config.background_image_uri ?? initialBackgroundImageUri ?? null;
+    setBackgroundImageUri(initialUri);
+    setOriginalBackgroundImageUri(initialUri);
     setBackgroundImageCrop(config.background_image_crop ?? null);
     setBackgroundImageSource(config.background_image_source ?? (config.unsplash_attribution ? 'unsplash' : null));
     setBackgroundImageAttribution(config.unsplash_attribution ?? null);
@@ -1180,6 +1341,7 @@ export default function QuotesView({
 
   useEffect(() => {
     if (!backgroundImageUri) {
+      setOriginalBackgroundImageUri(null);
       setBackgroundImageCrop(null);
       setBackgroundImageSource(null);
       setBackgroundImageAttribution(null);
@@ -1306,19 +1468,9 @@ export default function QuotesView({
     label:"Size"
   },
   {
-    name:"FontShadow",
-    icon:<MaterialIcons name="text-shadow" size={24}/>,
-    label:"Shadow"
-  },
-  {
-    name:"BoxWidth",
-    icon:<MaterialIcons name="arrow-expand-horizontal" size={24}/>,
-    label:"Box Width"
-  },
-  {
-    name:"AddText",
-    icon:<MaterialIcons name="text-box-plus-outline" size={24}/>,
-    label:"Add Text"
+    name:"TextPosition",
+    icon:<MaterialIcons name="axis-arrow" size={24}/>,
+    label:"Text Position"
   },
   {
     name:"TextEdit",
@@ -1326,24 +1478,66 @@ export default function QuotesView({
     label:"Edit Text"
   },
   {
-    name:"TextPosition",
-    icon:<MaterialIcons name="axis-arrow" size={24}/>,
-    label:"Text Position"
+    name:"AddText",
+    icon:<MaterialIcons name="text-box-plus-outline" size={24}/>,
+    label:"Add Text"
+  },
+  {
+    name:"BoxWidth",
+    icon:<MaterialIcons name="arrow-expand-horizontal" size={24}/>,
+    label:"Box Width"
+  },
+  {
+    name:"FontShadow",
+    icon:<MaterialIcons name="text-shadow" size={24}/>,
+    label:"Shadow"
   }
 ];
   const featureColumns: typeof FeaturesArray[] = [];
   for (let i = 0; i < FeaturesArray.length; i += 2) {
     featureColumns.push(FeaturesArray.slice(i, i + 2));
   }
-  const image = useImage(backgroundImageUri ?? undefined);
+  const skiaImage = useImage(backgroundImageUri ?? undefined);
+  const isBackgroundImageLoading = Boolean(backgroundImageUri && !skiaImage);
+  // Ensure the canvas skeleton remains visible for at least 1.5s
+  const CANVAS_SKELETON_MIN_MS = 1500;
+  const [showCanvasSkeleton, setShowCanvasSkeleton] = useState<boolean>(false);
+  const canvasSkeletonStartRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    if (isBackgroundImageLoading) {
+      canvasSkeletonStartRef.current = Date.now();
+      setShowCanvasSkeleton(true);
+      return;
+    }
+
+    const start = canvasSkeletonStartRef.current;
+    if (!start) {
+      setShowCanvasSkeleton(false);
+      return;
+    }
+
+    const elapsed = Date.now() - start;
+    if (elapsed >= CANVAS_SKELETON_MIN_MS) {
+      setShowCanvasSkeleton(false);
+      canvasSkeletonStartRef.current = null;
+    } else {
+      const remaining = CANVAS_SKELETON_MIN_MS - elapsed;
+      const t = setTimeout(() => {
+        setShowCanvasSkeleton(false);
+        canvasSkeletonStartRef.current = null;
+      }, remaining);
+      return () => clearTimeout(t);
+    }
+  }, [isBackgroundImageLoading]);
 
   const backgroundImageCropRect = useMemo(() => {
-    if (!image || !backgroundImageCrop) {
+    if (!skiaImage || !backgroundImageCrop) {
       return null;
     }
 
-    const sourceWidth = image.width();
-    const sourceHeight = image.height();
+    const sourceWidth = skiaImage.width();
+    const sourceHeight = skiaImage.height();
     const cropWidth = Math.max(1, Math.min(sourceWidth, Math.round(backgroundImageCrop.width)));
     const cropHeight = Math.max(1, Math.min(sourceHeight, Math.round(backgroundImageCrop.height)));
     const maxCropX = Math.max(0, sourceWidth - cropWidth);
@@ -1357,10 +1551,10 @@ export default function QuotesView({
       height: cropHeight,
       rotation,
     };
-  }, [backgroundImageCrop, image]);
+  }, [backgroundImageCrop, skiaImage]);
 
   const backgroundPicture = useMemo(() => {
-    if (!image) {
+    if (!skiaImage) {
       return null;
     }
 
@@ -1380,29 +1574,49 @@ export default function QuotesView({
       : {
         x: 0,
         y: 0,
-        width: image.width(),
-        height: image.height(),
+        width: skiaImage.width(),
+        height: skiaImage.height(),
       };
     const destinationRect = Skia.XYWHRect(0, 0, nativeCanvasWidth, nativeCanvasHeight);
 
+    console.log('Render background picture:', {
+      backgroundImageUri,
+      originalBackgroundImageUri,
+      backgroundImageCrop,
+      backgroundImageCropRect,
+      baseSourceRect,
+      destinationRect: { x: 0, y: 0, width: nativeCanvasWidth, height: nativeCanvasHeight },
+      nativeCanvasWidth,
+      nativeCanvasHeight,
+      imageWidth: skiaImage.width(),
+      imageHeight: skiaImage.height(),
+    });
+
     canvas.save();
     if (backgroundImageCropRect?.rotation) {
-      canvas.rotate(backgroundImageCropRect.rotation, nativeCanvasWidth / 2, nativeCanvasHeight / 2);
-      canvas.drawImageRect(
-        image,
-        Skia.XYWHRect(baseSourceRect.x, baseSourceRect.y, baseSourceRect.width, baseSourceRect.height),
-        Skia.XYWHRect(
-          -nativeCanvasWidth / 2,
-          -nativeCanvasHeight / 2,
-          nativeCanvasWidth,
+      const rotation = backgroundImageCropRect.rotation;
+      const sourceRect = Skia.XYWHRect(baseSourceRect.x, baseSourceRect.y, baseSourceRect.width, baseSourceRect.height);
+      const isQuarterTurn = rotation === 90 || rotation === 270;
+      const rotatedDestination = isQuarterTurn
+        ? Skia.XYWHRect(
+          (nativeCanvasWidth - nativeCanvasHeight) / 2,
+          (nativeCanvasHeight - nativeCanvasWidth) / 2,
           nativeCanvasHeight,
-        ),
+          nativeCanvasWidth,
+        )
+        : destinationRect;
+
+      canvas.rotate(rotation, nativeCanvasWidth / 2, nativeCanvasHeight / 2);
+      canvas.drawImageRect(
+        skiaImage,
+        sourceRect,
+        rotatedDestination,
         paint,
         true,
       );
     } else {
       canvas.drawImageRect(
-        image,
+        skiaImage,
         Skia.XYWHRect(baseSourceRect.x, baseSourceRect.y, baseSourceRect.width, baseSourceRect.height),
         destinationRect,
         paint,
@@ -1412,7 +1626,7 @@ export default function QuotesView({
     canvas.restore();
 
     return recorder.finishRecordingAsPicture();
-  }, [backgroundImageCropRect, image, imageOpacity, nativeCanvasHeight, nativeCanvasWidth]);
+  }, [backgroundImageCropRect, skiaImage, imageOpacity, nativeCanvasHeight, nativeCanvasWidth]);
 
   const selectedTextBox = useMemo(
     () => textBoxes.find((box) => box.id === selectedTextBoxId) ?? null,
@@ -1893,28 +2107,47 @@ export default function QuotesView({
     return 'portrait';
   };
 
-  const openImageCropEditor = async (image: PendingCropImage) => {
-    let resolvedImage = image;
+  const openImageCropEditor = async (pendingImage: PendingCropImage) => {
+    let resolvedImage = pendingImage;
 
     if (!resolvedImage.width || !resolvedImage.height) {
-      try {
-        const size = await new Promise<{ width: number; height: number }>((resolve, reject) => {
-          Image.getSize(
-            resolvedImage.uri,
-            (width, height) => resolve({ width, height }),
-            reject,
-          );
-        });
+      if (resolvedImage.uri === backgroundImageUri && skiaImage) {
         resolvedImage = {
           ...resolvedImage,
-          width: size.width,
-          height: size.height,
+          width: skiaImage.width(),
+          height: skiaImage.height(),
         };
-      } catch (error) {
-        console.warn('Could not read image size', error);
-        Alert.alert('Unable to crop image', 'The selected image could not be prepared for cropping.');
-        return;
+      } else {
+        try {
+          const size = await new Promise<{ width: number; height: number }>((resolve, reject) => {
+            Image.getSize(
+              resolvedImage.uri,
+              (width, height) => resolve({ width, height }),
+              reject,
+            );
+          });
+          resolvedImage = {
+            ...resolvedImage,
+            width: size.width,
+            height: size.height,
+          };
+        } catch (error) {
+          console.warn('Could not read image size', error);
+          Alert.alert('Unable to crop image', 'The selected image could not be prepared for cropping.');
+          return;
+        }
       }
+    }
+
+    if (!resolvedImage.isNewSelection && originalBackgroundImageUri) {
+      resolvedImage = {
+        ...resolvedImage,
+        uri: originalBackgroundImageUri,
+      };
+    }
+
+    if (resolvedImage.isNewSelection) {
+      setOriginalBackgroundImageUri(resolvedImage.uri);
     }
 
     setPendingCropImage(resolvedImage);
@@ -1946,8 +2179,10 @@ export default function QuotesView({
 
     setUnsplashModalVisible(false);
 
+    const imageUri = getUnsplashPhotoSourceUrl(photo, 1920);
+    setOriginalBackgroundImageUri(imageUri);
     await openImageCropEditor({
-      uri: getUnsplashPhotoSourceUrl(photo, 1920),
+      uri: imageUri,
       width: photo.width ?? 0,
       height: photo.height ?? 0,
       label: 'Unsplash',
@@ -1962,14 +2197,14 @@ export default function QuotesView({
       return;
     }
 
-    if (!backgroundImageUri) {
+    if (!backgroundImageUri || !originalBackgroundImageUri) {
       setActiveCanvasKey(nextCanvasKey);
       return;
     }
 
     setPendingCanvasKey(nextCanvasKey);
     openImageCropEditor({
-      uri: backgroundImageUri,
+      uri: originalBackgroundImageUri,
       width: 0,
       height: 0,
       label: 'Background image',
@@ -1982,7 +2217,7 @@ export default function QuotesView({
     });
   };
 
-  const handleConfirmCrop = () => {
+  const handleConfirmCrop = async () => {
     if (!pendingCropImage || croppingImage) {
       return;
     }
@@ -1990,11 +2225,36 @@ export default function QuotesView({
     try {
       setCroppingImage(true);
 
-      const sourceWidth = pendingCropImage.width;
-      const sourceHeight = pendingCropImage.height;
+      const sourceUri = originalBackgroundImageUri ?? pendingCropImage.uri;
+      let sourceWidth = pendingCropImage.width;
+      let sourceHeight = pendingCropImage.height;
+
+      if (skiaImage && sourceUri === backgroundImageUri) {
+        sourceWidth = skiaImage.width();
+        sourceHeight = skiaImage.height();
+      }
+
+      if (!sourceWidth || !sourceHeight) {
+        try {
+          const size = await new Promise<{ width: number; height: number }>((resolve, reject) => {
+            Image.getSize(
+              sourceUri,
+              (width, height) => resolve({ width, height }),
+              reject,
+            );
+          });
+          sourceWidth = size.width;
+          sourceHeight = size.height;
+        } catch (err) {
+          console.warn('Could not read image size for crop', err);
+          throw new Error('The selected image does not have a valid size.');
+        }
+      }
+
       if (sourceWidth <= 0 || sourceHeight <= 0) {
         throw new Error('The selected image does not have a valid size.');
       }
+
       const crop = resolveCropRect(
         sourceWidth,
         sourceHeight,
@@ -2005,10 +2265,29 @@ export default function QuotesView({
         cropRotation,
       );
 
+      console.log('Crop confirmed:', {
+        sourceUri,
+        sourceWidth,
+        sourceHeight,
+        pendingCropImageUri: pendingCropImage.uri,
+        originalBackgroundImageUri,
+        pendingCanvasKey,
+        cropModalAspectRatio,
+        cropZoom,
+        cropOffsetX,
+        cropOffsetY,
+        cropRotation,
+        crop,
+      });
+
       if (pendingCanvasKey) {
         setActiveCanvasKey(pendingCanvasKey);
       }
-      setBackgroundImageUri(pendingCropImage.uri);
+
+      // Always apply the crop against the original source image URI so
+      // subsequent crops / canvas-resizes operate on the original image
+      // rather than a previously-applied cropped rendition.
+      setBackgroundImageUri(originalBackgroundImageUri ?? pendingCropImage.uri);
       setBackgroundImageCrop(crop);
       setBackgroundImageSource(pendingCropImage.source ?? null);
       setBackgroundImageAttribution(pendingCropImage.unsplashAttribution ?? null);
@@ -2176,28 +2455,17 @@ export default function QuotesView({
 
   
 
-  const HandleFeature = (featureName:string) => {
-    console.log("clicked on feature", featureName)
-        if (featureName === 'AddText') {
-          addTextBox();
-          setCurrentFeature('TextEdit');
-          setModalVisible(true);
-          return;
-        }
-        setCurrentFeature(featureName);
-        setModalVisible(featureName === 'TextEdit');
-    
-    // switch(featureName){
-    //   case "BackgroundImage":
-    //     setCurrentFeature(featureName);
-    //     setModalVisible(true);
-    //     break;
-    //   case "BackgroundColor":
-    //     //handle background color selection
-    //     setCurrentFeature(featureName);
-    //     setModalVisible(true);
-    //     break;
-    // }
+  const HandleFeature = (featureName: InlineFeatureKey | 'TextEdit' | 'AddText') => {
+    console.log('clicked on feature', featureName);
+    if (featureName === 'AddText') {
+      addTextBox();
+      setCurrentFeature('TextEdit');
+      setModalVisible(true);
+      return;
+    }
+
+    setCurrentFeature(featureName);
+    setModalVisible(featureName === 'TextEdit');
   };
 
   const HandleOpactyChange = (value:number) => {
@@ -2453,11 +2721,15 @@ export default function QuotesView({
               pointerEvents="box-none"
             >
               <Canvas style={{ width: nativeCanvasWidth, height: nativeCanvasHeight }}>
-                {renderCanvasContent(layoutTextBoxMetrics, nativeCanvasWidth, nativeCanvasHeight)}
+                {showCanvasSkeleton ? (
+                  <Rect x={0} y={0} width={nativeCanvasWidth} height={nativeCanvasHeight} color={bgColor} />
+                ) : (
+                  renderCanvasContent(layoutTextBoxMetrics, nativeCanvasWidth, nativeCanvasHeight)
+                )}
               </Canvas>
               <View style={StyleSheet.absoluteFill} pointerEvents="box-none">
                 <Pressable style={StyleSheet.absoluteFill} onPress={clearTextFocus} />
-                {textBoxes.map((box) => {
+                {!showCanvasSkeleton && textBoxes.map((box) => {
                   const isSelected = box.id === selectedTextBoxId;
                   const metric = layoutTextBoxMetrics.find((item) => item.box.id === box.id);
                   const boxWidth = Math.max(24, nativeCanvasWidth * (box.width_percent ?? DEFAULT_TEXT_BOX_WIDTH));
@@ -2491,6 +2763,7 @@ export default function QuotesView({
                     </Pressable>
                   );
                 })}
+                {showCanvasSkeleton ? <CanvasLoadingSkeleton /> : null}
               </View>
             </View>
             <Canvas
@@ -2826,11 +3099,40 @@ const styles = StyleSheet.create({
     position: 'relative',
     overflow: 'hidden',
   },
+  canvasSkeletonOverlay: {
+    position: 'absolute',
+    left: 0,
+    top: 0,
+    right: 0,
+    bottom: 0,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: 'rgba(252, 245, 245, 0.5)',
+  },
+  canvasSkeletonBackground: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: '#e8e8e8',
+  },
+  canvasSkeletonLine: {
+    width: '72%',
+    height: 14,
+    borderRadius: 8,
+    backgroundColor: 'rgba(255,255,255,0.7)',
+    marginBottom: 10,
+  },
+  canvasSkeletonLineShort: {
+    backgroundColor: 'rgba(255,255,255,0.92)',
+  },
+  canvasSkeletonLineSmaller: {
+    width: '35%',
+    backgroundColor: '#ffffff',
+  },
   previewStage: {
     position: 'absolute',
     left: 0,
     top: 0,
     transformOrigin: 'top left',
+    backgroundColor: 'rgba(0,0,0,0.06)',
   },
   textBoxOverlay: {
     position: 'absolute',

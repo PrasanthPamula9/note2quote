@@ -39,17 +39,8 @@ function getQuotePreviewFilePath(quoteId) {
   return `${RNFS.DocumentDirectoryPath}/notetoquote/quote-previews/${quoteId}.jpg`;
 }
 
-/**
- * @param {string} quoteId
- * @param {string | number | null} [cacheBust]
- */
-function getQuotePreviewImageUri(quoteId, cacheBust = null) {
-  const uri = `file://${getQuotePreviewFilePath(quoteId)}`;
-  if (cacheBust == null) {
-    return uri;
-  }
-
-  return `${uri}?v=${encodeURIComponent(String(cacheBust))}`;
+function getQuotePreviewImageUri(quoteId) {
+  return `file://${getQuotePreviewFilePath(quoteId)}`;
 }
 
 async function saveQuotePreviewImage(quoteId, previewBase64) {
@@ -61,7 +52,11 @@ async function saveQuotePreviewImage(quoteId, previewBase64) {
   const RNFS = getRNFS();
   const directory = `${RNFS.DocumentDirectoryPath}/notetoquote/quote-previews`;
   const filePath = getQuotePreviewFilePath(quoteId);
-  await RNFS.mkdir(directory);
+  try {
+    await RNFS.mkdir(directory);
+  } catch (error) {
+    // Directory may already exist; that's acceptable.
+  }
   await RNFS.writeFile(filePath, trimmedPreview, 'base64');
   return getQuotePreviewImageUri(quoteId);
 }
