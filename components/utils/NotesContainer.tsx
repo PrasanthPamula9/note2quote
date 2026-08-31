@@ -3,8 +3,6 @@ import { Alert, BackHandler, Modal, Pressable, StyleSheet, Text, TextInput, Touc
 import Animated, {
   SlideInLeft,
   SlideInRight,
-  SlideOutLeft,
-  SlideOutRight,
 } from 'react-native-reanimated';
 import NotesView from '../views/NotesView';
 import NoteDetailView from '../views/NoteDetailView';
@@ -38,7 +36,6 @@ export default function NotesContainer({ onCreateQuote }: NotesContainerProps) {
   const [createNotebookVisible, setCreateNotebookVisible] = useState(false);
   const [newNotebookName, setNewNotebookName] = useState('');
   const enterDuration = 300;
-  const exitDuration = 240;
 
   const visibleNotes = useMemo(() => {
     if (activeNotebookId === 'all') {
@@ -253,11 +250,6 @@ export default function NotesContainer({ onCreateQuote }: NotesContainerProps) {
                 ? SlideInRight.duration(enterDuration)
                 : SlideInLeft.duration(enterDuration)
             }
-            exiting={
-              transitionDirection === 'forward'
-                ? SlideOutLeft.duration(exitDuration)
-                : SlideOutRight.duration(exitDuration)
-            }
           >
             <NotesView
               notes={visibleNotes}
@@ -292,11 +284,6 @@ export default function NotesContainer({ onCreateQuote }: NotesContainerProps) {
               transitionDirection === 'forward'
                 ? SlideInRight.duration(enterDuration)
                 : SlideInLeft.duration(enterDuration)
-            }
-            exiting={
-              transitionDirection === 'forward'
-                ? SlideOutLeft.duration(exitDuration)
-                : SlideOutRight.duration(exitDuration)
             }
           >
             <NoteDetailView

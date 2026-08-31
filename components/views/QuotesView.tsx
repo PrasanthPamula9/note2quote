@@ -1430,7 +1430,11 @@ export default function QuotesView({
       ? (settingsScrollX / maxSettingsScroll) * scrollbarUsableWidth
       : 0;
   const showSettingsScrollbar = maxSettingsScroll > 0;
-  const FeaturesArray=[
+  const FeaturesArray: Array<{
+    name: InlineFeatureKey | 'TextEdit' | 'AddText';
+    icon: React.ReactNode;
+    label: string;
+  }> = [
   {
     name:"BackgroundImage",
     icon:<MaterialIcons name="image" size={24}/>,
