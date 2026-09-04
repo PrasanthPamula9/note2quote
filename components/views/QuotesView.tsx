@@ -774,9 +774,19 @@ const InlineFeaturePanel = React.memo(function InlineFeaturePanel({
     Math.min(18, Math.round(screenWidth * (screenWidth >= 768 ? 0.022 : 0.028))),
   );
   const inlinePickerGap = Math.max(6, Math.round(screenHeight * (screenWidth >= 768 ? 0.006 : 0.008)));
-  const resolvedFontIndex = Math.max(
+  const defaultFontIndex = Math.max(
     0,
-    fontOptions.findIndex((item) => item.family === resolvedTextFamily),
+    fontOptions.findIndex((item) => item.family === DEFAULT_FONT_FAMILY),
+  );
+  const activeFontFamily = useMemo(() => {
+    if (resolvedTextFamily && fontOptions.some((item) => item.family === resolvedTextFamily)) {
+      return resolvedTextFamily;
+    }
+    return DEFAULT_FONT_FAMILY;
+  }, [resolvedTextFamily, fontOptions]);
+  const resolvedFontIndex = Math.max(
+    defaultFontIndex,
+    fontOptions.findIndex((item) => item.family === activeFontFamily),
   );
 
   useEffect(() => {
@@ -799,7 +809,7 @@ const InlineFeaturePanel = React.memo(function InlineFeaturePanel({
 
     const animationFrame = requestAnimationFrame(() => {
       fontStripRef.current?.scrollToIndex({
-        index: resolvedFontIndex,
+        index: resolvedFontIndex >= 0 ? resolvedFontIndex : defaultFontIndex,
         animated: true,
         viewPosition: 0.5,
       });
@@ -1007,7 +1017,7 @@ const InlineFeaturePanel = React.memo(function InlineFeaturePanel({
                 }, 50);
               }}
               renderItem={({ item }) => {
-                const isActive = resolvedTextFamily === item.family;
+                const isActive = activeFontFamily === item.family;
                 return (
                   <Pressable
                     onPress={() => {

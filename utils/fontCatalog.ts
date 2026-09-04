@@ -39,4 +39,4 @@ export const QUOTE_FONT_CATALOG: FontCatalogEntry[] = [
   { family: 'Space Mono', label: 'Space Mono', category: 'Mono / Typewriter', bestFor: 'Retro-modern quote designs', fallbackFamily: 'monospace' },
 ];
 
-export const DEFAULT_FONT_FAMILY = 'Inter';
+export const DEFAULT_FONT_FAMILY = 'Courier Prime';
